@@ -6,6 +6,7 @@ import { chooseBackend } from './backend.mjs';
 import { UI, LANG_KEY, pickLang, translateError } from './i18n.mjs';
 import { diaryPromiseFor, diarySummaryFor, diarySampleFor, DIARY_PROMISE_VERSION } from './diary-promise.mjs';
 import { SPEED_KEY, pickSpeed, nextSpeed, clock, lengthOf, seekTo, levelOf, pushLevel } from './voice.mjs';
+import { TUTORIAL, PLATFORMS, VAPID_META, platformOf, pushState, turnOn, turnOff } from './notify.mjs';
 
 const main = document.getElementById('main');
 const stored = () => { try { return localStorage.getItem(LANG_KEY); } catch { return null; } };
@@ -40,9 +41,15 @@ function h(tag, attrs = {}, ...children) {
     else if (k === 'class') el.className = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
-  for (const c of children.flat()) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
+  el.append(...kids(children));
   return el;
 }
+// 子の並び: 入れ子の配列は平らにし、null・undefined・false は落とす。
+// replaceChildren(null) はブラウザでは「null」という文字になるので、置き換えるときも必ずここを通す（T35）
+function kids(list) {
+  return list.flat(Infinity).filter((c) => c != null && c !== false).map((c) => (c instanceof Node ? c : String(c)));
+}
+const fill = (el, ...children) => el.replaceChildren(...kids(children));
 
 // 保存の層（backend.mjs）。試作のサーバーか Supabase かを、画面は気にしない
 let backend;
@@ -106,13 +113,23 @@ function paintWave(canvas, levels) {
   });
 }
 
-const show = (...nodes) => main.replaceChildren(...nodes);
+const show = (...nodes) => fill(main, ...nodes);
+// 空の値（null・undefined・空の文字・NaN）は画面に出さない（T35）
+const has = (v) => v != null && v !== '' && !(typeof v === 'number' && Number.isNaN(v));
+// 抜けた人などで名前が無いときは「だれか」にする
+const byName = (by) => (has(by) ? by : T.someone);
+// 上の右の名前。グループの名前が無いとき（交換日記・Supabase 版）は表示名だけ
+function setWho(me) {
+  const name = has(me.displayName) ? me.displayName : '';
+  document.getElementById('who').textContent = me.mode !== 'diary' && name && has(me.group) ? T.who(name, me.group) : name;
+}
 // サーバーの断りは日本語で来る。英語の画面では辞書（i18n.mjs の ERRORS_EN）で英語にする
 const errorLine = (err) => h('p', { class: 'error', role: 'alert' }, translateError(err.message, lang));
-const sec = (s) => T.sec(Math.round(s));
+const sec = (s) => T.sec(Math.round(Number(s) || 0));
 
 // ---- 録音（maxSec で自分から止まる・送る前に聞ける・録り直せる） ----
-function recorder(maxSec, onSend, label) {
+// big: 書く画面の主な行動。大きな丸いボタンにする（T35・work/ui-patterns.md）
+function recorder(maxSec, onSend, label, { big = false } = {}) {
   const box = h('div', { class: 'recorder' });
   let rec = null;
   let chunks = [];
@@ -150,7 +167,10 @@ function recorder(maxSec, onSend, label) {
   }
 
   function idle(msg) {
-    box.replaceChildren(h('div', { class: 'row' }, h('button', { class: 'primary', onclick: start }, T.recordButton(label, maxSec))), msg ? h('p', { class: 'meta' }, msg) : null);
+    const button = big
+      ? h('button', { class: 'record-big', type: 'button', onclick: start }, h('span', { class: 'dot', 'aria-hidden': 'true' }), h('span', {}, label), h('small', {}, T.upTo(maxSec)))
+      : h('button', { class: 'primary', type: 'button', onclick: start }, T.recordButton(label, maxSec));
+    fill(box, h('div', { class: big ? 'row center' : 'row' }, button), msg ? h('p', { class: 'meta' }, msg) : null);
   }
   async function start() {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') return idle(T.noRecorder);
@@ -219,12 +239,12 @@ const diaryPromiseBox = () => {
 
 // ---- 入る（F1）。約束を読んで同意しないと入れない。どちらの言語で読んだかも残す ----
 // T31: 1画面で「入る」まで届くように、上は3行の要約だけ。約束の全文は「くわしく読む」を開くと読める（消さない）。
+// T34: メールの欄は無い（受け取らない）。聞くのは表示名だけ
 // 印は、約束全体に1つ（とくに同意をいただく2つの名前を挙げる）と、交換日記なら社内で使うときの約束に1つ
 async function joinView(invite) {
   const info = await backend.inviteInfo(invite);
   const diary = info.mode === 'diary';
   const name = h('input', { type: 'text', id: 'name', maxlength: 20, required: true, autocomplete: 'nickname' });
-  const email = h('input', { type: 'email', id: 'email', autocomplete: 'email' });
   const agree = h('input', { type: 'checkbox', id: 'agree', required: true });
   const agreePromise = diary ? h('input', { type: 'checkbox', id: 'agree-promise', required: true }) : null;
   const out = h('div');
@@ -234,13 +254,13 @@ async function joinView(invite) {
     if (!agree.checked) return out.replaceChildren(errorLine(new Error(T.mustAgree)));
     if (agreePromise && !agreePromise.checked) return out.replaceChildren(errorLine(new Error(T.mustAgreePromise)));
     try {
-      await backend.join({ invite, displayName: name.value, email: email.value, consent: CONSENT_VERSION, consentLang: lang, promise: diary ? DIARY_PROMISE_VERSION : undefined });
-      history.replaceState(null, '', '/#/'); // 招待の文字列を URL から消す
+      await backend.join({ invite, displayName: name.value, consent: CONSENT_VERSION, consentLang: lang, promise: diary ? DIARY_PROMISE_VERSION : undefined });
+      // 招待の文字列を URL から消す。交換日記は、はじめに通知のチュートリアルを出す（T36。「あとで」で飛ばせる）
+      history.replaceState(null, '', diary ? '/#/notify' : '/#/');
       route();
     } catch (err) { out.replaceChildren(errorLine(err)); }
   } },
   h('label', { for: 'name' }, T.nameLabel), name,
-  h('label', { for: 'email' }, T.emailLabel), email,
   h('label', { class: 'check' }, agree, T.agreeLabel),
   agreePromise ? h('label', { class: 'check' }, agreePromise, T.nbAgreeLabel) : null,
   h('div', { class: 'row' }, h('button', { class: 'primary', type: 'submit' }, T.joinButton)), out);
@@ -280,6 +300,7 @@ function selfSection(me) {
     h('div', { class: 'row' }, name, h('button', { class: 'small', onclick: async () => {
       try { await backend.rename(name.value); route(); } catch (err) { out.replaceChildren(errorLine(err)); }
     } }, T.renameButton)),
+    me.mode === 'diary' ? h('p', {}, h('a', { href: '#/notify' }, T.notifyMeLink)) : null,
     h('details', {}, h('summary', {}, T.readConsent), consentBox()),
     me.mode === 'diary' ? h('details', {}, h('summary', {}, T.nbReadPromise), diaryPromiseBox()) : null,
     h('div', { class: 'row' }, h('button', { class: 'small danger', onclick: leave }, T.leaveButton)),
@@ -292,7 +313,7 @@ async function homeView() {
   if (me.mode === 'diary') return notebookView(me);
   const [prompts, keep, collection] = await Promise.all([backend.prompts(),
     backend.keepList().catch(() => ({ open: false })), backend.collection().catch(() => null)]);
-  document.getElementById('who').textContent = T.who(me.displayName, me.group);
+  setWho(me);
   const notices = me.notices.filter((n) => n.kind !== 'prompt');
   show(
     notices.length ? h('section', {}, h('h2', {}, T.noticesTitle), h('ul', { class: 'plain' }, notices.map((n) => h('li', { class: 'card notice' },
@@ -342,7 +363,7 @@ async function promptView(id) {
     const out = h('div');
     const act = (fn) => async () => { try { await fn(); reload(); } catch (err) { out.replaceChildren(errorLine(err)); } };
     return h('li', { class: 'card' },
-      h('div', { class: 'meta' }, T.voiceMeta(x.by, x.mine, x.kind === 'voice' ? T.voiceLen(sec(x.durationSec)) : T.kindLabels.text)),
+      h('div', { class: 'meta' }, T.voiceMeta(byName(x.by), x.mine, x.kind === 'voice' ? T.voiceLen(sec(x.durationSec)) : T.kindLabels.text)),
       x.kind === 'voice' ? audioEl('voice', x) : h('p', {}, x.text),
       h('div', { class: 'row' },
         x.mine ? h('span', { class: 'meta' }, T.marksMine(x.marks))
@@ -351,7 +372,7 @@ async function promptView(id) {
         // 講座で紹介してよい（S10）: 押した声だけ運営者が聞ける。いつでも外せる
         x.mine ? h('button', { class: 'small', onclick: act(() => backend.setShare(x.id, !x.shared)) }, x.shared ? T.shareOn : T.shareOff) : null),
       x.replies.length ? h('ul', { class: 'plain replies' }, x.replies.map((r) => h('li', {},
-        h('span', { class: 'meta' }, T.replyBy(r.by)),
+        h('span', { class: 'meta' }, T.replyBy(byName(r.by))),
         r.kind === 'voice' ? audioEl('reply', r) : r.text,
         r.mine ? h('button', { class: 'small', onclick: del(() => backend.deleteReply(r.id), T.deleteReplyConfirm) }, T.deleteButton) : null))) : null,
       h('details', {}, h('summary', {}, T.replyToggle),
@@ -414,44 +435,94 @@ async function collectionView() {
   show(back, h('h2', {}, T.collectionTitle),
     c.state === 'review' ? h('p', { class: 'meta' }, T.collectionReview, ' ', h('a', { href: '#/keep' }, T.keepTitle)) : null,
     h('ul', { class: 'plain' }, c.items.map((x) => h('li', { class: 'card' },
-      h('div', { class: 'meta' }, T.collectionItem(x.position, x.prompt, x.by)),
+      h('div', { class: 'meta' }, T.collectionItem(x.position, x.prompt, byName(x.by))),
       x.kind === 'voice' ? audioEl('voice', x) : h('p', {}, x.text)))));
 }
 
 // ---- 交換日記版（mvp-spec §7）: ノートの画面・書き手の画面・ページと余白・冊子の棚 ----
 // 誰がノートを持っているか・順番・誰がお休みしたかは、どの画面にも出さない（D-2・D-3）
-const toNotebook = () => h('p', {}, h('a', { href: '#/' }, T.nbBack));
-const when = (t) => new Date(t).toLocaleString(T.htmlLang, { month: 'short', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
-const pageLen = (x) => (x.kind === 'voice' ? T.voiceLen(sec(x.durationSec)) : T.kindLabels.text);
-const pageTitle = (x) => x.cardText ?? (x.follows ? T.nbFollowed : T.nbFree);
+// T35（work/ui-patterns.md）: 下のタブ（ノート・書く・棚・自分）で、1画面に主な行動を1つ。説明は1行。
+// 空の値（null・undefined・NaN・不正な日付）は、その部分ごと出さない（test/screens.test.mjs が全画面を描いて確かめる）
+const toNotebook = () => h('p', { class: 'back' }, h('a', { href: '#/' }, T.nbBack));
+const validTime = (t) => has(t) && !Number.isNaN(new Date(t).getTime());
+const when = (t) => (validTime(t) ? new Date(t).toLocaleString(T.htmlLang, { month: 'short', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '');
+const pageLen = (x) => (x.kind === 'voice' ? (has(x.durationSec) ? T.voiceLen(sec(x.durationSec)) : T.kindLabels.voice) : T.kindLabels.text);
+const pageTitle = (x) => x.cardText || (x.follows ? T.nbFollowed : T.nbFree);
 // 書いた本人が付けた見出し（T33）があれば大きく出し、カードの問いはその下に小さく
-const pageHead = (x) => x.title ?? pageTitle(x);
+const pageHead = (x) => x.title || pageTitle(x);
 const cardLine = (x) => (x.title ? h('p', { class: 'meta card-line' }, pageTitle(x)) : null);
+// 一覧の下の小さな行: 長さと、0 でない数だけ（「余白 0」は出さない）
+const pageMeta = (x) => [pageLen(x), x.margins?.length ? T.nbMargins(x.margins.length) : null, x.marks ? T.nbMarks(x.marks) : null].filter(Boolean).join(' · ');
+const volumeName = (n, state) => (!has(n) ? T.nbShelfTitle : T.nbVolumeStates[state] ? T.nbVolumeLabel(n, T.nbVolumeStates[state]) : T.nbCoverVolume(n));
 
 // 1ページの紙（T32）: 上に日付、下に書き手の名前。日付は日まで（時刻は出さない）
 const day = (t) => new Date(t).toLocaleDateString(T.htmlLang, { month: 'short', day: 'numeric', weekday: 'short' });
-const dateLine = (t) => (t == null ? null : h('time', { class: 'date', datetime: new Date(t).toISOString() }, day(t)));
-const sign = (x) => h('span', { class: 'sign' }, T.nbSign(x.by, x.mine));
+const dateLine = (t) => (validTime(t) ? h('time', { class: 'date', datetime: new Date(t).toISOString() }, day(t)) : null);
+const sign = (x) => h('span', { class: 'sign' }, T.nbSign(byName(x.by), x.mine));
 
 // 自分の番の知らせ（T32）: 画面のいちばん上に大きく「あなたの番です（残り◯時間）」。残りは切り上げで、1時間を切っても1と出す
 const HOUR = 60 * 60 * 1000;
-const hoursLeft = (dueAt) => Math.max(1, Math.ceil((new Date(dueAt).getTime() - Date.now()) / HOUR));
+const hoursLeft = (dueAt) => (validTime(dueAt) ? Math.max(1, Math.ceil((new Date(dueAt).getTime() - Date.now()) / HOUR)) : null);
 function turnBanner(nb, { link = true } = {}) {
   if (!nb.myTurn) return null;
-  const body = [h('strong', {}, T.nbTurnBanner(hoursLeft(nb.turn.dueAt))), h('span', {}, nb.turn.remind ? T.nbTurnRemind : T.nbTurnHint)];
+  const left = hoursLeft(nb.turn?.dueAt);
+  const body = [h('strong', {}, left == null ? T.nbTurnNow : T.nbTurnBanner(left)), h('span', {}, nb.turn?.remind ? T.nbTurnRemind : T.nbTurnHint)];
   return link ? h('a', { class: 'turn', href: '#/write' }, body) : h('div', { class: 'turn', role: 'status' }, body);
 }
 // 渡す・受け取るの1行（封筒の印は飾り。読み上げない）
 const handoff = (attrs, ...children) => h('div', { class: 'handoff', ...attrs }, h('span', { class: 'mark', 'aria-hidden': 'true' }, '✉'), h('p', {}, ...children));
+// 空の画面の一言（状態ごと）。次の行動があれば1つだけ下に
+const empty = (text, ...action) => h('div', { class: 'empty' }, h('p', {}, text), ...action);
+
+// 下のタブ（4つ・どの画面でも同じ並び）。自分の番のときは「書く」に点
+function tabBar(active, nb) {
+  const tabs = [['#/', '📖', T.nbTabNotebook], ['#/write', '🎙', T.nbTabWrite], ['#/books', '📚', T.nbTabShelf], ['#/me', '🙂', T.nbTabMe]];
+  return h('nav', { class: 'tabs', 'aria-label': T.nbTabsAria }, tabs.map(([href, icon, label]) =>
+    h('a', { href, 'aria-current': href === active ? 'page' : null, class: href === '#/write' && nb?.myTurn ? 'due' : null },
+      h('span', { class: 'icon', 'aria-hidden': 'true' }, icon), h('span', { class: 'label' }, label))));
+}
 
 async function notebookView(me) {
   const nb = await backend.notebook();
-  document.getElementById('who').textContent = T.who(me.displayName, me.group);
+  setWho(me);
   document.getElementById('footer').textContent = T.nbFooter;
   const notices = [
-    ...nb.binding.filter((b) => b.myPages).map((b) => h('li', { class: 'card notice' }, h('a', { href: `#/book/${b.id}` }, T.nbNoticeBind))),
-    ...nb.notices.map((n) => h('li', { class: 'card notice' }, h('a', { href: `#/page/${n.pageId}` }, n.kind === 'mark' ? T.nbNoticeMark : T.nbNoticeMargin))),
-  ].filter(Boolean);
+    ...(nb.binding ?? []).filter((b) => b.myPages && b.id).map((b) => h('li', { class: 'card notice' }, h('a', { href: `#/book/${b.id}` }, T.nbNoticeBind))),
+    ...(nb.notices ?? []).filter((n) => n.pageId).map((n) => h('li', { class: 'card notice' }, h('a', { href: `#/page/${n.pageId}` }, n.kind === 'mark' ? T.nbNoticeMark : T.nbNoticeMargin))),
+  ];
+  const pages = nb.pages ?? [];
+  // 番でないときの一言（状態ごと）。休み中は「また書く」が主な行動
+  const status = nb.resting ? empty(T.nbResting, h('button', { class: 'small', onclick: async () => { await backend.resumeTurns(); route(); } }, T.nbResume))
+    : nb.state === 'waiting' ? empty(T.nbWaiting)
+      : nb.state === 'stopped' ? empty(T.nbStopped)
+        : nb.myTurn ? null : h('p', { class: 'meta wait' }, T.nbWaitTurn);
+  show(
+    turnBanner(nb),
+    status,
+    notices.length ? h('ul', { class: 'plain' }, notices) : null,
+    (nb.binding ?? []).filter((b) => b.id && has(b.number)).map((b) => h('p', { class: 'card' }, h('a', { href: `#/book/${b.id}` },
+      validTime(b.reviewEndsAt) ? T.nbBindingLink(b.number, when(b.reviewEndsAt)) : T.nbBound(b.number)))),
+    h('div', { class: 'nb-head' }, h('h2', {}, has(nb.notebook?.name) ? nb.notebook.name : T.nbUntitled),
+      has(nb.volume?.number) ? h('span', { class: 'meta' }, T.nbVolumeNow(nb.volume.number, pages.length)) : null),
+    pages.length ? h('ul', { class: 'plain' }, pages.map((x) => h('li', { class: 'page' },
+      dateLine(x.createdAt),
+      h('a', { class: 'title', href: `#/page/${x.id}` }, pageHead(x)),
+      cardLine(x),
+      x.kind === 'text' && has(x.text) ? h('p', { class: 'body' }, x.text) : null,
+      sign(x),
+      h('div', { class: 'meta' }, pageMeta(x)))))
+      // まだページが無い: 1冊目なら書き方の見本を出す
+      : [!nb.volume || nb.volume.number === 1 ? samplePage() : null, nb.state === 'running' ? empty(T.nbNoPages) : null],
+    tabBar('#/', nb),
+  );
+}
+
+// 自分（タブの4つ目）: 表示名・約束を読む・仲間を招く・抜ける。ノートの画面から移した（T35）
+async function meView() {
+  const me = await backend.me();
+  setWho(me);
+  if (me.mode !== 'diary') return show(selfSection(me));
+  const nb = await backend.notebook().catch(() => null);
   const out = h('div');
   const renew = async () => {
     try {
@@ -460,71 +531,60 @@ async function notebookView(me) {
     } catch (err) { out.replaceChildren(errorLine(err)); }
   };
   show(
-    turnBanner(nb),
-    notices.length ? h('section', {}, h('h2', {}, T.noticesTitle), h('ul', { class: 'plain' }, notices)) : null,
-    h('h2', {}, nb.notebook.name),
-    h('p', { class: 'meta' }, nb.state === 'running' ? T.nbRunning(nb.volume.number, nb.volume.pages) : nb.state === 'waiting' ? T.nbWaiting : T.nbStopped),
-    nb.resting ? h('p', { class: 'card' }, T.nbResting, ' ', h('button', { class: 'small', onclick: async () => { await backend.resumeTurns(); route(); } }, T.nbResume)) : null,
-    nb.binding.map((b) => h('p', { class: 'card' }, h('a', { href: `#/book/${b.id}` }, T.nbBindingLink(b.number, when(b.reviewEndsAt))))),
-    nb.volume ? h('h3', {}, T.nbPagesTitle(nb.volume.number)) : null,
-    !nb.volume || nb.volume.number === 1 ? samplePage() : null,
-    nb.pages.length ? h('ul', { class: 'plain' }, nb.pages.map((x) => h('li', { class: 'page' },
-      dateLine(x.createdAt),
-      h('a', { class: 'title', href: `#/page/${x.id}` }, pageHead(x)),
-      cardLine(x),
-      x.kind === 'text' ? h('p', { class: 'body' }, x.text) : null,
-      sign(x),
-      h('div', { class: 'meta' }, pageLen(x), ' · ', T.nbMarginCount(x.margins.length, x.marks))))) : h('p', {}, T.nbNoPages),
-    h('p', {}, h('a', { href: '#/books' }, T.nbShelfLink(nb.shelf))),
-    h('details', {}, h('summary', {}, T.nbInviteToggle), h('p', { class: 'meta' }, T.nbInviteHint),
-      h('div', { class: 'row' }, h('button', { class: 'small', onclick: renew }, T.nbInviteButton)), out),
+    h('section', { class: 'invite' }, h('h2', {}, T.nbInviteToggle), h('p', { class: 'meta' }, T.nbInviteHint),
+      h('div', { class: 'row' }, h('button', { class: 'primary', onclick: renew }, T.nbInviteButton)), out),
     selfSection(me),
+    tabBar('#/me', nb),
   );
 }
 
 // 書き手の画面（自分の番のときだけ）: 前の人から届いたページ → カードを引くか自由に → 声か文字で書いて渡す／お休み
+// T35: 主な行動は大きな丸い録音ボタン1つ。何を書くかは3つの札から選ぶだけ。文字・お休みは下に小さく
 async function writeView() {
   const nb = await backend.notebook();
-  if (!nb.myTurn) return show(toNotebook(), h('p', {}, T.nbNotYourTurn));
+  if (!nb.myTurn) return show(empty(T.nbNotYourTurn), tabBar('#/write', nb));
   let choice = { cardId: null, follows: false };
-  const chosen = h('p', { class: 'meta', 'aria-live': 'polite' }, T.nbFreeChosen);
+  const chosen = h('p', { class: 'meta chosen', 'aria-live': 'polite' }, T.nbFreeChosen);
   const cardsBox = h('div');
   const out = h('div');
+  const from = has(nb.turn?.from?.name) ? nb.turn.from : null;
+  const chips = [];
+  const chip = (label, onclick) => { const b = h('button', { class: 'chip', type: 'button', 'aria-pressed': 'false', onclick: () => { chips.forEach((c) => c.setAttribute('aria-pressed', String(c === b))); onclick(); } }, label); chips.push(b); return b; };
   const pick = (c, label) => { choice = c; chosen.textContent = label; };
   const draw = async () => {
     try {
       const cards = await backend.drawCards();
-      cardsBox.replaceChildren(h('ul', { class: 'plain' }, cards.map((c) => h('li', {},
-        h('button', { class: 'small', onclick: () => pick({ cardId: c.id, follows: false }, T.nbCardChosen(c.text)) }, c.text)))));
+      cardsBox.replaceChildren(h('ul', { class: 'plain cards' }, cards.filter((c) => has(c.text)).map((c) => h('li', {},
+        h('button', { class: 'card-pick', type: 'button', onclick: () => pick({ cardId: c.id, follows: false }, T.nbCardChosen(c.text)) }, c.text)))));
     } catch (err) { cardsBox.replaceChildren(errorLine(err)); }
   };
-  const done = () => show(handoff({ role: 'status' }, T.nbHanded), toNotebook());
+  // 渡した直後の小さな祝い（work/ui-patterns.md の6）。封筒が少し動く。動きを減らす設定では止まる（style.css）
+  const done = () => show(h('div', { class: 'handed', role: 'status' }, h('span', { class: 'mark', 'aria-hidden': 'true' }, '✉'),
+    h('h2', {}, T.nbHandedTitle), h('p', {}, T.nbHanded)), h('p', { class: 'center' }, h('a', { class: 'button', href: '#/' }, T.nbBack)), tabBar('#/write', null));
   // 見出し（T33）: 書いた本人が付ける一行。なくてもよい。声でも文字でも同じ欄を使う
   const title = h('input', { type: 'text', id: 'page-title', maxlength: 20, autocomplete: 'off', placeholder: T.nbTitlePlaceholder });
   const write = async (input) => { await backend.writePage(input, { ...choice, title: title.value.trim() || null }); done(); };
   const text = h('textarea', { rows: 5, maxlength: 400, id: 'page-text' });
-  const from = nb.turn.from;
-  show(turnBanner(nb, { link: false }), toNotebook(), h('h2', {}, T.nbWriteTitle),
-    handoff({}, from ? [T.nbFrom(from.name), ' ', h('a', { href: `#/page/${from.pageId}` }, T.nbReadIt)] : T.nbNewVolume),
-    h('p', { class: 'meta' }, T.nbDue(when(nb.turn.dueAt))),
-    h('h3', {}, T.nbHowTitle),
-    h('div', { class: 'row' },
-      h('button', { class: 'small', onclick: draw }, T.nbDraw),
-      h('button', { class: 'small', onclick: () => { cardsBox.replaceChildren(); pick({ cardId: null, follows: false }, T.nbFreeChosen); } }, T.nbFree),
-      from ? h('button', { class: 'small', onclick: () => { cardsBox.replaceChildren(); pick({ cardId: null, follows: true }, T.nbFollowChosen(from.name)); } }, T.nbFollow) : null),
+  const free = chip(T.nbFree, () => { cardsBox.replaceChildren(); pick({ cardId: null, follows: false }, T.nbFreeChosen); });
+  free.setAttribute('aria-pressed', 'true');
+  show(turnBanner(nb, { link: false }),
+    handoff({}, from ? [T.nbFrom(from.name), from.pageId ? [' ', h('a', { href: `#/page/${from.pageId}` }, T.nbReadIt)] : null] : T.nbNewVolume),
+    h('div', { class: 'chips', role: 'group', 'aria-label': T.nbHowTitle },
+      chip(T.nbDraw, draw), free,
+      from ? chip(T.nbFollow, () => { cardsBox.replaceChildren(); pick({ cardId: null, follows: true }, T.nbFollowChosen(from.name)); }) : null),
     cardsBox, chosen,
     h('label', { for: 'page-title' }, T.nbTitleLabel), title,
-    recorder(60, (audio) => write({ kind: 'voice', audio }), T.nbWriteVoice),
+    recorder(60, (audio) => write({ kind: 'voice', audio }), T.nbWriteVoice, { big: true }),
     h('details', {}, h('summary', {}, T.nbWriteText), h('label', { for: 'page-text' }, T.textMax), text,
       h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => {
         try { await write({ kind: 'text', text: text.value }); } catch (err) { out.replaceChildren(errorLine(err)); }
       } }, T.nbHandOff))),
-    h('div', { class: 'row' }, h('button', { onclick: async () => {
+    h('div', { class: 'row end' }, h('button', { class: 'quiet', title: T.nbSkipHint, onclick: async () => {
       if (!confirm(T.nbSkipConfirm)) return;
       try { await backend.skipTurn(); done(); } catch (err) { out.replaceChildren(errorLine(err)); }
     } }, T.nbSkip)),
-    h('p', { class: 'meta' }, T.nbSkipHint),
-    out);
+    out,
+    tabBar('#/write', nb));
 }
 
 // 1ページと余白。余白を書くとき「冊子に入れてよい」を選べる（既定は入れない）
@@ -534,48 +594,56 @@ async function notebookPageView(id) {
   const out = h('div');
   const act = (fn) => async () => { try { await fn(); reload(); } catch (err) { out.replaceChildren(errorLine(err)); } };
   const del = (fn, msg) => async () => { if (confirm(msg)) await act(fn)(); };
-  const open = x.volume.state !== 'released';
+  const vol = x.volume ?? {};
+  const open = vol.state !== 'released';
+  const margins = x.margins ?? [];
   const marginText = h('input', { type: 'text', maxlength: 140, 'aria-label': T.replyAria, placeholder: T.nbMarginPlaceholder });
   const inBook = h('input', { type: 'checkbox' });
+  const marks = Number(x.marks) || 0;
   show(toNotebook(),
-    h('p', { class: 'meta' }, T.nbVolumeLabel(x.volume.number, T.nbVolumeStates[x.volume.state])),
     h('article', { class: 'page' },
       dateLine(x.createdAt),
       h('h2', {}, pageHead(x)),
       cardLine(x),
-      x.kind === 'voice' ? audioEl('page', x) : h('p', { class: 'body' }, x.text),
+      x.kind === 'voice' ? audioEl('page', x) : h('p', { class: 'body' }, x.text ?? ''),
       sign(x),
-      h('div', { class: 'meta' }, pageLen(x))),
+      has(vol.number) ? h('div', { class: 'meta' }, volumeName(vol.number, vol.state)) : null),
     h('div', { class: 'row' },
-      x.mine ? h('span', { class: 'meta' }, T.marksMine(x.marks))
-        : h('button', { class: 'small', disabled: x.markedByMe || !open, onclick: act(() => backend.margin(id, { kind: 'mark' })) }, x.markedByMe ? T.markDone(x.marks) : T.mark(x.marks)),
-      x.mine ? h('button', { class: 'small', onclick: async () => {
+      x.mine ? (marks ? h('span', { class: 'meta' }, T.marksMine(marks)) : null)
+        : h('button', { class: 'small mark-btn', disabled: x.markedByMe || !open, onclick: act(() => backend.margin(id, { kind: 'mark' })) }, x.markedByMe ? T.markDone(marks) : T.mark(marks)),
+      x.mine ? h('button', { class: 'small quiet', onclick: async () => {
         if (!confirm(T.nbDeletePageConfirm)) return;
         try { await backend.deletePage(id); location.hash = '#/'; } catch (err) { out.replaceChildren(errorLine(err)); }
       } }, T.deleteButton) : null),
     h('h3', {}, T.nbMarginsTitle),
-    x.margins.length ? h('ul', { class: 'plain replies' }, x.margins.map((r) => h('li', {},
-      h('span', { class: 'meta' }, T.replyBy(r.by)),
-      r.kind === 'voice' ? audioEl('margin', r) : r.text,
+    margins.length ? h('ul', { class: 'plain replies' }, margins.map((r) => h('li', {},
+      h('span', { class: 'meta' }, T.replyBy(byName(r.by))),
+      r.kind === 'voice' ? audioEl('margin', r) : (r.text ?? ''),
       r.mine && open ? h('button', { class: 'small', onclick: act(() => backend.setMarginInBook(r.id, !r.inBook)) }, r.inBook ? T.nbInBookOn : T.nbInBookOff) : null,
-      r.mine ? h('button', { class: 'small', onclick: del(() => backend.deleteMargin(r.id), T.nbDeleteMarginConfirm) }, T.deleteButton) : null))) : h('p', { class: 'meta' }, T.nbNoMargins),
-    open ? h('section', {},
+      r.mine ? h('button', { class: 'small quiet', onclick: del(() => backend.deleteMargin(r.id), T.nbDeleteMarginConfirm) }, T.deleteButton) : null)))
+      : h('p', { class: 'meta' }, open ? T.nbNoMargins : T.nbNoMarginsClosed),
+    // 主な行動: 余白に一言（声でも）
+    open ? h('section', { class: 'margin-form' },
+      h('div', { class: 'row' }, marginText, h('button', { class: 'primary', onclick: act(() => backend.margin(id, { kind: 'text', text: marginText.value }, { inBook: inBook.checked })) }, T.send)),
       h('label', { class: 'check' }, inBook, T.nbInBookLabel),
-      h('div', { class: 'row' }, marginText, h('button', { class: 'small', onclick: act(() => backend.margin(id, { kind: 'text', text: marginText.value }, { inBook: inBook.checked })) }, T.send)),
       recorder(30, async (audio) => { await backend.margin(id, { kind: 'voice', audio }, { inBook: inBook.checked }); reload(); }, T.nbMarginVoice)) : null,
-    out);
+    out,
+    tabBar('#/', null));
 }
 
 // 冊子の棚: 綴じた冊が並ぶ（ノートの「たまっていく記録」）
 // 表紙（T32）: 「◯冊目」を大きく、ノートの名前・ページ数・いまの状態を小さく
 async function shelfView() {
   const [list, nb] = await Promise.all([backend.books(), backend.notebook()]);
-  show(turnBanner(nb), toNotebook(), h('h2', {}, T.nbShelfTitle),
-    list.length ? h('ul', { class: 'shelf' }, list.map((b) => h('li', {},
-      h('a', { href: `#/book/${b.id}`, 'aria-label': `${nb.notebook.name} ${T.nbVolumeLabel(b.number, T.nbVolumeStates[b.state])}` },
+  const name = has(nb.notebook?.name) ? nb.notebook.name : T.nbUntitled;
+  const books = (list ?? []).filter((b) => b.id && has(b.number));
+  show(turnBanner(nb), h('h2', {}, T.nbShelfTitle),
+    books.length ? h('ul', { class: 'shelf' }, books.map((b) => h('li', {},
+      h('a', { href: `#/book/${b.id}`, 'aria-label': `${name} ${volumeName(b.number, b.state)}` },
         h('span', { class: 'vol' }, T.nbCoverVolume(b.number)),
-        h('span', { class: 'name' }, nb.notebook.name),
-        h('span', { class: 'state' }, T.nbBookPages(b.pages), ' · ', T.nbVolumeStates[b.state]))))) : h('p', {}, T.nbShelfEmpty));
+        h('span', { class: 'name' }, name),
+        h('span', { class: 'state' }, [has(b.pages) ? T.nbBookPages(b.pages) : null, T.nbVolumeStates[b.state]].filter(Boolean).join(' · ')))))) : empty(T.nbShelfEmpty),
+    tabBar('#/books', nb));
 }
 
 // 1冊の冊子。確かめの間は、自分のページを残すか選べる（何も選ばなくてよい）
@@ -583,35 +651,67 @@ async function bookView(id) {
   const b = await backend.book(id);
   const reload = () => bookView(id);
   const out = h('div');
-  show(toNotebook(), h('p', {}, h('a', { href: '#/books' }, T.nbShelfTitle)),
-    h('h2', {}, T.nbVolumeLabel(b.number, T.nbVolumeStates[b.state])),
-    b.state === 'review' ? h('p', { class: 'meta' }, T.nbReviewHint(when(b.reviewEndsAt))) : null,
+  const items = b.items ?? [];
+  show(h('p', { class: 'back' }, h('a', { href: '#/books' }, T.nbBackShelf)),
+    h('h2', {}, volumeName(b.number, b.state)),
+    b.state === 'review' ? h('p', { class: 'meta' }, validTime(b.reviewEndsAt) ? T.nbReviewHint(when(b.reviewEndsAt)) : T.nbReviewHintNoDate) : null,
     b.mine ? h('section', {}, h('h3', {}, T.nbKeepTitle),
       b.mine.length ? h('ul', { class: 'plain' }, b.mine.map((p) => h('li', { class: 'card' },
         p.title ? h('strong', {}, p.title) : null,
-        h('div', { class: 'meta' }, p.cardText ?? T.nbFree, ' · ', T.kindLabels[p.kind]),
-        p.kind === 'text' ? h('p', {}, p.text) : null,
+        h('div', { class: 'meta' }, pageTitle(p), ' · ', pageLen(p)),
+        p.kind === 'text' && has(p.text) ? h('p', {}, p.text) : null,
         h('button', { class: 'small', onclick: async () => {
           try { await backend.setPageKeep(p.id, !p.keep); reload(); } catch (err) { out.replaceChildren(errorLine(err)); }
         } }, p.keep ? T.keepOn : T.nbKeepOff)))) : h('p', { class: 'meta' }, T.nbNoMyPages)) : null,
     out,
     h('h3', {}, T.nbBookTitle),
-    b.items.length ? h('ul', { class: 'plain' }, b.items.map((x) => h('li', { class: 'page' },
+    items.length ? h('ul', { class: 'plain' }, items.map((x) => h('li', { class: 'page' },
       dateLine(x.createdAt),
       h('span', { class: 'title' }, pageHead(x)),
       cardLine(x),
-      x.kind === 'voice' ? audioEl('page', x) : h('p', { class: 'body' }, x.text),
+      x.kind === 'voice' ? audioEl('page', x) : h('p', { class: 'body' }, x.text ?? ''),
       sign(x),
-      x.margins.length ? h('ul', { class: 'plain replies' }, x.margins.map((r) => h('li', {},
-        h('span', { class: 'meta' }, T.replyBy(r.by)), r.kind === 'voice' ? audioEl('margin', r) : r.text))) : null))) : h('p', {}, T.nbBookEmpty));
+      x.margins?.length ? h('ul', { class: 'plain replies' }, x.margins.map((r) => h('li', {},
+        h('span', { class: 'meta' }, T.replyBy(byName(r.by))), r.kind === 'voice' ? audioEl('margin', r) : (r.text ?? '')))) : null))) : empty(T.nbBookEmpty),
+    tabBar('#/books', null));
+}
+
+// 通知のチュートリアル（T36・notify.mjs）: 機種ごとに「置く → 開く → 許可」の3枚。下に、いまの状態と「通知を受け取る」を1つ。
+// はじめて入ったあとに出し、あとから「自分」の画面のリンクでもう一度見られる。iPhone はホーム画面から開いたときだけ許可を聞ける
+const vapidKey = () => document.querySelector?.(`meta[name="${VAPID_META}"]`)?.getAttribute('content')?.trim() ?? '';
+let notifyPlatform = null;
+async function notifyView() {
+  const nb = await backend.notebook().catch(() => null);
+  const platform = notifyPlatform ?? platformOf(navigator.userAgent);
+  const publicKey = vapidKey();
+  const win = globalThis;
+  const out = h('div');
+  const state = await pushState({ win, publicKey });
+  const act = (fn) => async () => { try { await fn(); notifyView(); } catch (err) { out.replaceChildren(errorLine(err)); } };
+  const action = state === 'off' ? h('button', { class: 'primary', type: 'button', onclick: act(() => turnOn({ win, publicKey, lang, save: (s) => backend.savePush(s) })) }, T.notifyOn)
+    : state === 'on' ? h('button', { class: 'small quiet', type: 'button', onclick: act(() => turnOff({ win, remove: (e) => backend.deletePush(e) })) }, T.notifyOff)
+      : null;
+  const steps = T.notifySteps[platform];
+  show(h('h2', {}, T.notifyTitle), h('p', { class: 'meta' }, T.notifyIntro),
+    h('div', { class: 'chips', role: 'group', 'aria-label': T.notifyPlatformAria }, PLATFORMS.map((p) =>
+      h('button', { class: 'chip', type: 'button', 'aria-pressed': String(p === platform), onclick: () => { notifyPlatform = p; notifyView(); } }, T.notifyPlatforms[p]))),
+    h('ol', { class: 'plain tutorial' }, TUTORIAL[platform].map((img, i) => h('li', { class: 'card step' },
+      h('img', { src: img, alt: '', width: 120, height: 144 }),
+      h('div', {}, h('span', { class: 'meta' }, T.notifyStep(i + 1, steps.length)), h('h3', {}, steps[i][0]), h('p', {}, steps[i][1]))))),
+    h('section', { class: 'notify-now', 'aria-live': 'polite' }, T.notifyStates[state] ? h('p', { role: 'status' }, T.notifyStates[state]) : null,
+      action ? h('div', { class: 'row center' }, action) : null, out),
+    h('p', { class: 'center' }, h('a', { href: '#/' }, T.notifyLater)),
+    nb ? tabBar('#/me', nb) : null);
 }
 
 async function route() {
   try {
+    if (location.hash === '#/notify') return await notifyView();
     if (location.hash === '#/keep') return await keepView();
     if (location.hash === '#/collection') return await collectionView();
     if (location.hash === '#/write') return await writeView();
     if (location.hash === '#/books') return await shelfView();
+    if (location.hash === '#/me') return await meView();
     const page = location.hash.match(/^#\/page\/([\w-]+)$/);
     if (page) return await notebookPageView(page[1]);
     const book = location.hash.match(/^#\/book\/([\w-]+)$/);

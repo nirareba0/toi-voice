@@ -10,6 +10,9 @@
   <meta name="toi-voice-supabase-url" content="https://odnxedqpatsvzzqfwqrl.supabase.co">
   <meta name="toi-voice-supabase-anon-key" content="sb_publishable_C1u_b7sbPwwAuFFROPAGZw_DMKyitdb">
   <meta name="toi-voice-supabase-js" content="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm">
+  <!-- 通知（T36）: Web Push の「公開の」鍵（VAPID public key）。空なら「通知の準備がまだです」と出す。
+       tools/build-pages.mjs が config.local.json の vapidPublicKey を入れる。秘密の鍵はここにも、どのファイルにも書かない（Supabase の Secrets だけ） -->
+  <meta name="toi-voice-vapid-public-key" content="">
   <title>問いと声（試作）</title>
   <link rel="stylesheet" href="style.css">
   <!-- ホーム画面に置けるように（T32）。アイコンは tools/make-icons.mjs で作る -->

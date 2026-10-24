@@ -8,10 +8,13 @@ export const SEASON_METHODS = ['swapNomination', 'keepList', 'setKeep', 'setShar
 export const DIARY_METHODS = ['inviteInfo', 'renewInvite', 'notebook', 'drawCards', 'writePage', 'skipTurn', 'resumeTurns',
   'page', 'deletePage', 'setPageKeep', 'margin', 'deleteMargin', 'setMarginInBook', 'books', 'book'];
 
+// 通知（T36・notify.mjs）: Web Push の購読を保存する・消す。中身は { endpoint, p256dh, auth, lang } だけ
+export const NOTIFY_METHODS = ['savePush', 'deletePush'];
+
 export const BACKEND_METHODS = [
   'join', 'me', 'rename', 'leave', 'prompts', 'prompt', 'answer', 'deleteVoice',
   'reply', 'deleteReply', 'audioUrl', 'final', 'answerFinal', 'deleteFinal',
-  ...SEASON_METHODS, ...DIARY_METHODS,
+  ...SEASON_METHODS, ...DIARY_METHODS, ...NOTIFY_METHODS,
 ];
 
 export function localBackend({ fetch = globalThis.fetch.bind(globalThis), base = '' } = {}) {
@@ -31,7 +34,7 @@ export function localBackend({ fetch = globalThis.fetch.bind(globalThis), base =
     : api(path, { method: 'POST', json: { kind: input.kind, text: input.text } }));
 
   return {
-    join: ({ invite, displayName, email, consent, consentLang, promise }) => api('/api/join', { method: 'POST', json: { invite, displayName, email, consent, consentLang, promise } }),
+    join: ({ invite, displayName, consent, consentLang, promise }) => api('/api/join', { method: 'POST', json: { invite, displayName, consent, consentLang, promise } }),
     me: () => api('/api/me'),
     rename: (displayName) => api('/api/me/name', { method: 'POST', json: { displayName } }),
     leave: () => api('/api/me', { method: 'DELETE' }),
@@ -68,5 +71,8 @@ export function localBackend({ fetch = globalThis.fetch.bind(globalThis), base =
     setMarginInBook: (id, inBook) => api(`/api/margins/${id}/in-book`, { method: 'POST', json: { inBook } }),
     books: () => api('/api/books'),
     book: (id) => api(`/api/books/${id}`),
+    // 試作のサーバーは購読を持つだけで、送らない（送るのは Supabase の Edge Function・work/notify-setup.md）
+    savePush: ({ endpoint, p256dh, auth, lang }) => api('/api/push', { method: 'POST', json: { endpoint, p256dh, auth, lang } }),
+    deletePush: (endpoint) => api('/api/push', { method: 'DELETE', json: { endpoint } }),
   };
 }

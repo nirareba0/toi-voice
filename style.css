@@ -24,7 +24,7 @@ header a { color: inherit; text-decoration: none; }
 .who { color: var(--sub); font-size: .9rem; margin: 0; }
 footer { margin-top: 3rem; color: var(--sub); font-size: .8rem; }
 h2 { font-size: 1.3rem; }
-ul.plain { list-style: none; padding: 0; }
+ul.plain, ol.plain { list-style: none; padding: 0; }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: .5rem; padding: .8rem 1rem; margin: .8rem 0; }
 .meta { color: var(--sub); font-size: .85rem; }
 .notice { border-left: 4px solid var(--accent); }
@@ -33,7 +33,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.small { padding: .2rem .6rem; min-height: 36px; font-size: .9rem; }
 button:disabled { opacity: .5; cursor: default; }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-input[type=text], input[type=email], textarea { width: 100%; font: inherit; color: var(--ink); background: var(--surface); padding: .5rem; border: 1px solid var(--field); border-radius: .4rem; }
+input[type=text], textarea { width: 100%; font: inherit; color: var(--ink); background: var(--surface); padding: .5rem; border: 1px solid var(--field); border-radius: .4rem; }
 label { display: block; margin: .8rem 0 .2rem; }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; margin: .5rem 0; }
 .timer { font-variant-numeric: tabular-nums; font-size: 1.4rem; }
@@ -94,3 +94,49 @@ ul.shelf a { display: flex; flex-direction: column; justify-content: space-betwe
 ul.shelf .vol { font-size: 1.5rem; font-weight: bold; line-height: 1.2; }
 ul.shelf .name { font-size: .85rem; }
 ul.shelf .state { font-size: .8rem; opacity: .85; }
+
+/* ---- やりたくなるシンプルな画面（T35・work/ui-patterns.md）: 下のタブ・大きな録音ボタン・選ぶ札・空の画面・渡した瞬間 ---- */
+body:has(nav.tabs) { padding-bottom: calc(5rem + env(safe-area-inset-bottom)); }
+nav.tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; justify-content: center; background: var(--surface); border-top: 1px solid var(--line); padding: .3rem 0 calc(.3rem + env(safe-area-inset-bottom)); }
+nav.tabs a { position: relative; flex: 1; max-width: 10rem; display: flex; flex-direction: column; align-items: center; gap: .1rem; min-height: 48px; padding: .2rem 0; color: var(--sub); text-decoration: none; font-size: .75rem; }
+nav.tabs .icon { font-size: 1.35rem; line-height: 1.2; }
+nav.tabs a[aria-current="page"] { color: var(--accent); font-weight: bold; }
+nav.tabs a.due::after { content: ""; position: absolute; top: .25rem; left: calc(50% + .7rem); width: .6rem; height: .6rem; border-radius: 50%; background: var(--accent); }
+.back { margin: .5rem 0; }
+.back a { text-decoration: none; }
+.nb-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; flex-wrap: wrap; }
+.nb-head h2 { margin: 1rem 0 .3rem; }
+.empty { text-align: center; color: var(--sub); padding: 1.6rem 1rem; margin: .8rem 0; border: 1px dashed var(--line); border-radius: .6rem; }
+.empty p { margin: 0 0 .6rem; }
+.empty p:last-child { margin: 0; }
+.wait { text-align: center; }
+.center { text-align: center; justify-content: center; }
+.row.end { justify-content: flex-end; }
+button.quiet { border-color: transparent; background: transparent; color: var(--sub); text-decoration: underline; }
+a.button { display: inline-block; padding: .6rem 1.4rem; border-radius: 2rem; background: var(--accent); color: var(--on-accent); text-decoration: none; min-height: 44px; }
+/* 何を書くかの札（1つだけ選ばれる） */
+.chips { display: flex; gap: .5rem; flex-wrap: wrap; margin: 1rem 0 .3rem; }
+button.chip { border-radius: 2rem; padding: .3rem 1rem; min-height: 40px; border-color: var(--line); }
+button.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+/* 通知のチュートリアル（T36）: 絵と短い文の3枚。絵は紙の色の上に置くので、暗い画面でも見える */
+.tutorial .step { display: flex; gap: 1rem; align-items: center; }
+.tutorial .step img { flex: none; width: 96px; height: auto; background: var(--paper); border-radius: .6rem; }
+.tutorial .step h3 { margin: .2rem 0; }
+.tutorial .step p { margin: .2rem 0 0; }
+.notify-now { margin: 1.2rem 0; }
+ul.cards li { margin: .4rem 0; }
+button.card-pick { width: 100%; text-align: left; background: var(--paper); border-color: var(--rule); border-radius: .5rem; }
+.chosen { margin: .2rem 0 0; }
+/* 書く画面の主な行動: 大きな丸い録音ボタン */
+button.record-big { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .2rem; width: 9.5rem; height: 9.5rem; margin: 1.2rem auto; border-radius: 50%; border: none; background: var(--accent); color: var(--on-accent); font-weight: bold; box-shadow: 0 4px 14px var(--shadow); }
+button.record-big .dot { width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--on-accent); }
+button.record-big small { font-weight: normal; font-size: .8rem; opacity: .9; }
+button.record-big:active { transform: scale(.97); }
+.margin-form { margin-top: 1rem; }
+.margin-form .row input[type=text] { flex: 1; width: auto; }
+/* 渡した瞬間（小さく祝う）。動きを減らす設定では動かさない */
+.handed { text-align: center; padding: 2rem 1rem 1rem; }
+.handed .mark { display: inline-grid; place-items: center; width: 4.5rem; height: 4.5rem; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-size: 2.2rem; animation: fly .9s ease-out both; }
+.handed h2 { font-size: 1.6rem; margin: 1rem 0 .2rem; }
+@keyframes fly { 0% { transform: translateY(1.5rem) scale(.6); opacity: 0; } 60% { transform: translateY(-.4rem) scale(1.08) rotate(-6deg); opacity: 1; } 100% { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .handed .mark { animation: none; } button.record-big:active { transform: none; } }

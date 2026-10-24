@@ -3,7 +3,8 @@
 // supabase/schema.sql の private.consent_version() も同じ値にする（test/schema.test.mjs が突き合わせる）
 // 2026-10-24（T25）: シーズン制と本人の決定（AIOS toi-voice DECISIONS 2026-10-24）に揃えた。privacy-terms-draft.md §H の10項目
 // 2026-10-24（T31）: 別の欄の2つの印を、約束全体の印1つにまとめた（印の文に2つの名前を挙げる）。中身は変えていない
-export const CONSENT_VERSION = '2026-10-24-season-2';
+// 2026-10-24（T34）: メールアドレスを受け取らないことにした（本人「メアドとかは取らなくていいかな」）。お知らせはアプリの通知だけ
+export const CONSENT_VERSION = '2026-10-24-season-3';
 
 export const CONSENT_TITLE = '「問いと声」の約束 — あなたの声の扱い';
 
@@ -20,7 +21,7 @@ export const CONSENT = [
   ]],
   ['運営者に渡すもの・渡さないもの', [
     '運営者に渡すのは数だけです。運営者のグループ全部をまとめた数で、全部で [本人: 20人] 以上のときは週ごと、それより少ないときはシーズンの終わりの1枚だけです。[本人: 5] 未満の数は伏せます',
-    'あなたの声・文字・返事の中身、あなたが答えたかどうか、表示名・メール、通報があったこと、あなたが抜けたことは、運営者に渡しません。運営者が求めても、人ごとの数は出しません',
+    'あなたの声・文字・返事の中身、あなたが答えたかどうか、表示名、通報があったこと、あなたが抜けたことは、運営者に渡しません。運営者が求めても、人ごとの数は出しません',
     '運営者にも会社にも、声の中身を見る画面や役割はありません。例外は、あなたが自分の声に「講座で紹介してよい」を押したときで、その声だけを運営者が聞けます。いつでも外せて、外すとその場で聞けなくなります',
     '会社が研修として申し込んだときも、会社は運営者と同じ扱いで、数だけを受け取ります',
     'ただ、10人ほどのグループなので、数から誰かを推し量れることがあります。少ない数は伏せるようにします',
@@ -34,7 +35,7 @@ export const CONSENT = [
     '声と文字を、宣伝・事例・研究・AI の学習に使いません',
     '声を文字にするのは、あなたが自分の声について頼んだときだけです。結果はあなたの画面にだけ出ます。声を AI で分析することはしません',
     '声の中身を、講座の採点・成績や、会社の評価・仕事の報告に使わせません',
-    'メールはお知らせにだけ使います（仲間にも運営者にも見せません）',
+    'メールアドレスはうかがいません。お知らせは、このアプリの通知だけです',
     '問い合わせに AI が最初に答えるときも、AI に渡すのは問い合わせの文だけです',
   ]],
   ['残すこと・消すこと', [
@@ -86,7 +87,7 @@ export const CONSENT_EN = [
   ]],
   ['What is and is not given to the organiser', [
     'The organiser receives only numbers, combined across all of their groups: weekly when they have [owner: 20] or more people in total, otherwise a single sheet at the end of the season. Numbers under [owner: 5] are hidden',
-    'The content of your voice, text and replies, whether you answered, your display name and email, whether anything was reported, and whether you left are not given to the organiser. Even if the organiser asks, we do not give numbers per person',
+    'The content of your voice, text and replies, whether you answered, your display name, whether anything was reported, and whether you left are not given to the organiser. Even if the organiser asks, we do not give numbers per person',
     'Neither the organiser nor any company has a screen or role for seeing the content of voices. The one exception: if you press "OK to share in the course" on one of your own voices, the organiser can hear that voice only. You can undo it at any time, and they lose access immediately',
     'When a company signs up for a training, the company is treated the same as an organiser and receives numbers only',
     'However, because a group is only about 10 people, someone could sometimes be guessed from the numbers. Small numbers are hidden',
@@ -100,7 +101,7 @@ export const CONSENT_EN = [
     'We do not use voices or text for advertising, case studies, research or AI training',
     'A voice is turned into text only when you ask for it for your own voice. The result is shown only on your screen. We do not analyse voices with AI',
     'We do not let the content of voices be used for course grading or marks, or for company evaluations or work reports',
-    'Your email is used only for notifications (it is not shown to the group or the organiser)',
+    'We do not ask for your email address. Notifications come only from this app',
     'If an AI gives the first reply to an enquiry, only the text of the enquiry is given to the AI',
   ]],
   ['Keeping and deleting', [

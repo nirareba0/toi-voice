@@ -58,10 +58,10 @@ export function supabaseBackend(client, { signedUrlSec = SIGNED_URL_SEC, uuid = 
   }
 
   return {
-    // 招待のリンクを開いた人は、匿名のサインインで入る（メールはログインに使わない）
-    async join({ invite, displayName, email, consent, promise }) {
+    // 招待のリンクを開いた人は、匿名のサインインで入る（メールアドレスは受け取らない・T34）
+    async join({ invite, displayName, consent, promise }) {
       await signInIfNeeded();
-      return rpc('join_group', { p_invite: invite, p_display_name: displayName, p_email: email ?? '', p_consent: consent, p_promise: promise ?? null });
+      return rpc('join_group', { p_invite: invite, p_display_name: displayName, p_consent: consent, p_promise: promise ?? null });
     },
     async me() {
       if (!(await signedIn())) throw Object.assign(new Error('招待のリンクから入ってください'), { status: 401 });
@@ -127,6 +127,9 @@ export function supabaseBackend(client, { signedUrlSec = SIGNED_URL_SEC, uuid = 
     setMarginInBook: (id, inBook) => rpc('set_margin_in_book', { p_margin: id, p_in_book: !!inBook }),
     books: () => rpc('books'),
     book: (id) => rpc('book_view', { p_volume: id }),
+    // 通知（T36）: 購読は本人の行だけ（schema.sql の push_subscriptions と save_push・delete_push）
+    savePush: ({ endpoint, p256dh, auth, lang }) => rpc('save_push', { p_endpoint: endpoint, p_p256dh: p256dh, p_auth: auth, p_lang: lang ?? 'ja' }),
+    deletePush: (endpoint) => rpc('delete_push', { p_endpoint: endpoint }),
     // シーズン制（mvp-spec §0-11）の関数は schema.sql にまだ無い。呼ぶと断る（台帳 T30）
     ...Object.fromEntries(SEASON_METHODS.map((name) => [name, async () => {
       throw Object.assign(new Error('この機能は、まだ Supabase 版がありません'), { status: 501 });
