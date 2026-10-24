@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <!-- 保存の層（public/backend.mjs）: local＝試作のサーバー／supabase＝supabase/schema.sql を流したプロジェクト。
+       supabase にするときだけ、下の3つ（toi-voice-supabase-url・toi-voice-supabase-anon-key・toi-voice-supabase-js）を足す。鍵はここに書かない -->
+  <meta name="toi-voice-backend" content="supabase">
+  <meta name="toi-voice-supabase-url" content="https://odnxedqpatsvzzqfwqrl.supabase.co">
+  <meta name="toi-voice-supabase-anon-key" content="sb_publishable_C1u_b7sbPwwAuFFROPAGZw_DMKyitdb">
+  <meta name="toi-voice-supabase-js" content="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm">
+  <title>問いと声（試作）</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1><a href="#/">問いと声</a></h1>
+    <p class="who" id="who"></p>
+    <!-- 言語の切り替え（日本語 / English）。文言は i18n.mjs。下の日本語は読み込む前だけ出る -->
+    <button type="button" class="small" id="lang">English</button>
+  </header>
+  <main id="main" aria-live="polite"><p>読み込んでいます… / Loading…</p></main>
+  <footer><p id="footer">社内の試しです。声は、同じグループの仲間だけが聞けます。運営者には数だけを渡します。</p><p id="contact">困ったとき・相談: このノートを始めた人へ</p></footer>
+  <script type="module" src="app.mjs"></script>
+</body>
+</html>
