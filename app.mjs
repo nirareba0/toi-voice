@@ -111,7 +111,7 @@ const consentBox = () => {
   return h('section', { class: 'card consent', 'aria-labelledby': 'consent-title' },
     h('h3', { id: 'consent-title' }, c.title),
     c.draftNote ? h('p', { class: 'draft', role: 'note' }, c.draftNote) : null,
-    c.sections.map(([title, lines]) => [h('h4', {}, title), h('ul', {}, lines.map((l) => h('li', {}, l)))]),
+    c.sections.flatMap(([title, lines]) => [h('h4', {}, title), h('ul', {}, lines.map((l) => h('li', {}, l)))]),
     h('h4', {}, c.separateTitle), h('ul', {}, c.separate.map(([, l]) => h('li', {}, l))));
 };
 
