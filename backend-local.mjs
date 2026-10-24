@@ -56,8 +56,8 @@ export function localBackend({ fetch = globalThis.fetch.bind(globalThis), base =
     renewInvite: () => api('/api/notebook/invite', { method: 'POST', json: {} }),
     notebook: () => api('/api/notebook'),
     drawCards: () => api('/api/notebook/cards'),
-    // ページの中身は答えと同じ形。カードと「前のページに続ける」は URL の ? で渡す（声のときも同じ）
-    writePage: (input, { cardId = null, follows = false } = {}) => send(`/api/notebook/pages?${new URLSearchParams({ card: cardId ?? '', follows: follows ? '1' : '' })}`, input),
+    // ページの中身は答えと同じ形。カード・「前のページに続ける」・見出しは URL の ? で渡す（声のときも同じ）
+    writePage: (input, { cardId = null, follows = false, title = null } = {}) => send(`/api/notebook/pages?${new URLSearchParams({ card: cardId ?? '', follows: follows ? '1' : '', title: title ?? '' })}`, input),
     skipTurn: () => api('/api/notebook/skip', { method: 'POST', json: {} }),
     resumeTurns: () => api('/api/notebook/resume', { method: 'POST', json: {} }),
     page: (id) => api(`/api/pages/${id}`),

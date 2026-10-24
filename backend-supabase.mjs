@@ -109,9 +109,10 @@ export function supabaseBackend(client, { signedUrlSec = SIGNED_URL_SEC, uuid = 
       return view;
     },
     drawCards: () => rpc('draw_cards'),
-    writePage: (input, { cardId = null, follows = false } = {}) => withAudio(notebookFolder, input, (a) => rpc('write_page', {
+    // 見出し（T33）は任意。空は関数が「付けない」にする
+    writePage: (input, { cardId = null, follows = false, title = null } = {}) => withAudio(notebookFolder, input, (a) => rpc('write_page', {
       p_kind: input.kind, p_text: input.text ?? null, p_audio_path: a.path, p_mime: a.mime, p_duration: a.durationSec,
-      p_card: cardId ?? null, p_follows: !!follows,
+      p_card: cardId ?? null, p_follows: !!follows, p_title: title ?? null,
     })),
     skipTurn: () => rpc('skip_turn'),
     resumeTurns: () => rpc('resume_turns'),

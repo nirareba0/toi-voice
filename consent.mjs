@@ -2,7 +2,8 @@
 // 文を変えたら CONSENT_VERSION を上げる。入った人の記録には、同意した版が残る。
 // supabase/schema.sql の private.consent_version() も同じ値にする（test/schema.test.mjs が突き合わせる）
 // 2026-10-24（T25）: シーズン制と本人の決定（AIOS toi-voice DECISIONS 2026-10-24）に揃えた。privacy-terms-draft.md §H の10項目
-export const CONSENT_VERSION = '2026-10-24-season-1';
+// 2026-10-24（T31）: 別の欄の2つの印を、約束全体の印1つにまとめた（印の文に2つの名前を挙げる）。中身は変えていない
+export const CONSENT_VERSION = '2026-10-24-season-2';
 
 export const CONSENT_TITLE = '「問いと声」の約束 — あなたの声の扱い';
 
@@ -26,7 +27,7 @@ export const CONSENT = [
   ]],
   ['たいどが聞くとき', [
     'たいども、あなたの声を聞きません。聞くのは、声を受け取った仲間が「困る」と通報して、自分から出した声だけです。聞いたら、日付と理由を記録します（声の中身は写しません）',
-    '通報でたいどが聞くことには、この約束とは別の欄で同意をいただきます（下の「別の欄で同意をいただくこと」）',
+    '通報でたいどが聞くことには、とくに同意をいただきます（下の「とくに同意をいただくこと」）',
     '困ったとき・相談したいときの窓口は、どの画面でもいちばん下に出ています',
   ]],
   ['使わないこと', [
@@ -51,9 +52,9 @@ export const CONSENT = [
   ]],
 ];
 
-// 約束とは別の欄で、1つずつ印を付けてもらう同意（§H の2・9）。どれも印が無いと入れない【T25 の仮。§F の2・8】
-// 入った人の記録には、印を付けた id が consentItems として残る
-export const CONSENT_SEPARATE_TITLE = '別の欄で同意をいただくこと';
+// とくに同意をいただく2つ（§H の2・9）。T31 から別の欄の印をやめ、約束全体の印の文（i18n の agreeLabel）に名前を挙げる。
+// 印が無いと入れない。入った人の記録には、この id が consentItems として残る【§F の2・6: 足りないと言われたら別の印に戻す】
+export const CONSENT_SEPARATE_TITLE = 'とくに同意をいただくこと';
 
 export const CONSENT_SEPARATE = [
   ['report', '通報でたいどが聞くこと: グループの仲間が、ある声を「困る」と通報して出したとき、たいどがその声だけを聞いて、どうするかを決めることに同意します'],
@@ -92,7 +93,7 @@ export const CONSENT_EN = [
   ]],
   ['When Taido listens', [
     'Taido also does not listen to your voice. We listen only to a voice that a group member received and chose to report to us as a problem. When we listen, we record the date and the reason (not the content of the voice)',
-    'We ask for your agreement to Taido listening to reported voices in a separate box from this promise (see "Things we ask you to agree to separately" below)',
+    'We ask for your specific agreement to Taido listening to reported voices (see "Things we ask you to agree to specifically" below)',
     'The contact for problems or questions is always shown at the bottom of every screen',
   ]],
   ['What we do not do', [
@@ -117,7 +118,7 @@ export const CONSENT_EN = [
   ]],
 ];
 
-export const CONSENT_SEPARATE_TITLE_EN = 'Things we ask you to agree to separately';
+export const CONSENT_SEPARATE_TITLE_EN = 'Things we ask you to agree to specifically';
 
 export const CONSENT_SEPARATE_EN = [
   ['report', 'Taido listening to reported voices: when a group member reports a voice to us as a problem, I agree that Taido listens to that voice only and decides what to do'],
@@ -126,7 +127,20 @@ export const CONSENT_SEPARATE_EN = [
 
 export const CONSENT_CONTACT_EN = 'Problems or questions: the person who started this notebook';
 
+// 入る画面のいちばん上の3行の要約（T31）。上の約束の言葉から取り、約束に無いことを足さない。全文は「くわしく読む」の中
+export const CONSENT_SUMMARY = [
+  'あなたの声と文字は、同じグループの人だけが聞けます・読めます',
+  '運営者や会社に渡すのは数だけです。運営者が聞けるのは、あなたが「講座で紹介してよい」を押した声だけです',
+  '自分の声はいつでも消せます。サーバーにはシーズンの終わりから [本人: 1年] だけ置き、そのあと消します',
+];
+
+export const CONSENT_SUMMARY_EN = [
+  'Your voice notes and text can be heard and read only by people in the same group',
+  'The organiser or company receives only numbers. The organiser can hear a voice only if you press "OK to share in the course" on it',
+  'You can delete your voice at any time. It is kept on the server for only [owner: 1 year] after the season ends, and then deleted',
+];
+
 // 画面の言語に合わせた約束。英語には下書きの断りが付く
 export const consentFor = (lang) => (lang === 'en'
-  ? { title: CONSENT_TITLE_EN, sections: CONSENT_EN, draftNote: CONSENT_DRAFT_NOTE_EN, separateTitle: CONSENT_SEPARATE_TITLE_EN, separate: CONSENT_SEPARATE_EN, contact: CONSENT_CONTACT_EN }
-  : { title: CONSENT_TITLE, sections: CONSENT, draftNote: null, separateTitle: CONSENT_SEPARATE_TITLE, separate: CONSENT_SEPARATE, contact: CONSENT_CONTACT });
+  ? { title: CONSENT_TITLE_EN, summary: CONSENT_SUMMARY_EN, sections: CONSENT_EN, draftNote: CONSENT_DRAFT_NOTE_EN, separateTitle: CONSENT_SEPARATE_TITLE_EN, separate: CONSENT_SEPARATE_EN, contact: CONSENT_CONTACT_EN }
+  : { title: CONSENT_TITLE, summary: CONSENT_SUMMARY, sections: CONSENT, draftNote: null, separateTitle: CONSENT_SEPARATE_TITLE, separate: CONSENT_SEPARATE, contact: CONSENT_CONTACT });

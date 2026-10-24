@@ -1,0 +1,19 @@
+{
+  "name": "問いと声 — 交換日記",
+  "short_name": "問いと声",
+  "description": "仲間で回す、声の交換日記（試作）",
+  "lang": "ja",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fbf8f3",
+  "theme_color": "#c4502b",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

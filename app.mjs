@@ -4,7 +4,8 @@ import { createLimit } from './limit.mjs';
 import { consentFor, CONSENT_VERSION } from './consent.mjs';
 import { chooseBackend } from './backend.mjs';
 import { UI, LANG_KEY, pickLang, translateError } from './i18n.mjs';
-import { diaryPromiseFor, DIARY_PROMISE_VERSION } from './diary-promise.mjs';
+import { diaryPromiseFor, diarySummaryFor, diarySampleFor, DIARY_PROMISE_VERSION } from './diary-promise.mjs';
+import { SPEED_KEY, pickSpeed, nextSpeed, clock, lengthOf, seekTo, levelOf, pushLevel } from './voice.mjs';
 
 const main = document.getElementById('main');
 const stored = () => { try { return localStorage.getItem(LANG_KEY); } catch { return null; } };
@@ -46,11 +47,63 @@ function h(tag, attrs = {}, ...children) {
 // 保存の層（backend.mjs）。試作のサーバーか Supabase かを、画面は気にしない
 let backend;
 
-// 音声の URL は保存の層が出す（Supabase では期限つき URL なので、届いてから入れる）
-function audioEl(kind, item) {
-  const el = h('audio', { controls: true, preload: 'none' });
-  backend.audioUrl(kind, item).then((url) => { el.src = url; }, () => el.replaceWith(h('span', { class: 'meta' }, T.audioError)));
-  return el;
+// ---- 声を聞く（T33）: 再生・止める・聞く位置のつまみ（途中から聞ける）・速さ（1倍・1.5倍） ----
+// 速さは全部の声で同じにし、この端末に覚えておく。長さは記録の秒数を先に使う（録音した webm は長さが無いことがある）
+let speed = pickSpeed((() => { try { return localStorage.getItem(SPEED_KEY); } catch { return null; } })());
+function setSpeed(next) {
+  speed = next;
+  try { localStorage.setItem(SPEED_KEY, String(speed)); } catch { /* 覚えられなくても、この画面では変わる */ }
+  for (const a of document.querySelectorAll('.player audio')) { a.defaultPlaybackRate = speed; a.playbackRate = speed; }
+  for (const b of document.querySelectorAll('.player .speed')) b.textContent = T.speedButton(speed);
+}
+
+// src は URL か、URL を返す Promise（Supabase では期限つき URL なので、届いてから入れる）
+function player(src, durationSec) {
+  const audio = h('audio', { preload: 'none' });
+  let length = lengthOf(NaN, durationSec);
+  let dragging = false;
+  const play = h('button', { class: 'small play', type: 'button', disabled: true }, T.playButton);
+  const seek = h('input', { type: 'range', min: 0, max: Math.max(length, 0.1), step: 0.1, value: 0, 'aria-label': T.seekAria, disabled: true });
+  const time = h('span', { class: 'meta time' }, `${clock(0)} / ${clock(length)}`);
+  const rate = h('button', { class: 'small speed', type: 'button', 'aria-label': T.speedAria, onclick: () => setSpeed(nextSpeed(speed)) }, T.speedButton(speed));
+  const paint = (at = audio.currentTime) => {
+    time.textContent = `${clock(at)} / ${clock(length)}`;
+    seek.setAttribute('aria-valuetext', T.seekValue(clock(at), clock(length)));
+    if (!dragging) seek.value = String(at);
+  };
+  audio.addEventListener('loadedmetadata', () => { length = lengthOf(audio.duration, durationSec); seek.max = String(Math.max(length, 0.1)); paint(); });
+  audio.addEventListener('timeupdate', () => paint());
+  audio.addEventListener('play', () => { audio.playbackRate = speed; play.textContent = T.pauseButton; });
+  audio.addEventListener('pause', () => { play.textContent = T.playButton; });
+  play.addEventListener('click', () => (audio.paused ? audio.play().catch(() => {}) : audio.pause()));
+  seek.addEventListener('input', () => { dragging = true; paint(Number(seek.value)); });
+  seek.addEventListener('change', () => { audio.currentTime = seekTo(seek.value, length); dragging = false; paint(); });
+  const box = h('div', { class: 'player' }, audio, h('div', { class: 'row' }, play, seek, time, rate));
+  Promise.resolve(src).then((url) => {
+    audio.src = url;
+    audio.defaultPlaybackRate = speed;
+    play.disabled = false;
+    seek.disabled = false;
+  }, () => box.replaceWith(h('span', { class: 'meta' }, T.audioError)));
+  return box;
+}
+
+// 音声の URL は保存の層が出す
+const audioEl = (kind, item) => player(backend.audioUrl(kind, item), item.durationSec);
+
+// 録音中の波形（T33）: 右が新しい。色は style.css の変数から取る（暗い画面でも同じ決まり）
+const WAVE_BARS = 60;
+function paintWave(canvas, levels) {
+  const g = canvas.getContext('2d');
+  if (!g) return;
+  const { width: w, height: hh } = canvas;
+  const bar = w / WAVE_BARS;
+  g.clearRect(0, 0, w, hh);
+  g.fillStyle = getComputedStyle(canvas).getPropertyValue('--accent').trim() || 'currentColor';
+  levels.forEach((lv, i) => {
+    const y = Math.max(2, lv * hh);
+    g.fillRect((WAVE_BARS - levels.length + i) * bar + bar * 0.2, (hh - y) / 2, bar * 0.6, y);
+  });
 }
 
 const show = (...nodes) => main.replaceChildren(...nodes);
@@ -66,6 +119,35 @@ function recorder(maxSec, onSend, label) {
   let limit = null;
   let tick = null;
   let result = null;
+  let meter = null; // 波形のための AudioContext と描く周期（録音中だけ）
+
+  // 波形は飾り（読み上げは残り秒数）。AudioContext が無いブラウザでは出さない
+  function startWave(stream, canvas) {
+    const AC = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (!AC) return null;
+    try {
+      const ac = new AC();
+      const analyser = ac.createAnalyser();
+      analyser.fftSize = 512;
+      ac.createMediaStreamSource(stream).connect(analyser);
+      const buf = new Uint8Array(analyser.fftSize);
+      const m = { ac, raf: 0, levels: [] };
+      const draw = () => {
+        analyser.getByteTimeDomainData(buf);
+        m.levels = pushLevel(m.levels, levelOf(buf), WAVE_BARS);
+        paintWave(canvas, m.levels);
+        m.raf = requestAnimationFrame(draw);
+      };
+      draw();
+      return m;
+    } catch { return null; }
+  }
+  function stopWave() {
+    if (!meter) return;
+    cancelAnimationFrame(meter.raf);
+    meter.ac.close().catch(() => {});
+    meter = null;
+  }
 
   function idle(msg) {
     box.replaceChildren(h('div', { class: 'row' }, h('button', { class: 'primary', onclick: start }, T.recordButton(label, maxSec))), msg ? h('p', { class: 'meta' }, msg) : null);
@@ -78,6 +160,7 @@ function recorder(maxSec, onSend, label) {
     rec = new MediaRecorder(stream, { audioBitsPerSecond: 48000 });
     rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
     rec.onstop = () => {
+      stopWave();
       stream.getTracks().forEach((t) => t.stop());
       const durationSec = limit.stop();
       clearInterval(tick);
@@ -86,9 +169,17 @@ function recorder(maxSec, onSend, label) {
       review();
     };
     limit = createLimit(maxSec);
+    // 残り秒数は大きく。残り10秒を切ったら色を変える（T33）
     const timer = h('span', { class: 'timer', 'aria-live': 'off' }, T.remaining(maxSec));
-    box.replaceChildren(h('div', { class: 'row' }, h('span', {}, T.recording), timer, h('button', { onclick: () => rec.state !== 'inactive' && rec.stop() }, T.stop)));
-    tick = setInterval(() => { timer.textContent = T.remaining(limit.remaining()); }, 250);
+    const wave = h('canvas', { class: 'wave', width: 600, height: 96, 'aria-hidden': 'true' });
+    box.replaceChildren(h('div', { class: 'row' }, h('span', {}, T.recording), timer, h('button', { onclick: () => rec.state !== 'inactive' && rec.stop() }, T.stop)), wave);
+    tick = setInterval(() => {
+      const left = limit.remaining();
+      timer.textContent = T.remaining(left);
+      timer.classList.toggle('soon', left <= 10);
+    }, 250);
+    meter = startWave(stream, wave);
+    if (!meter) wave.remove();
     limit.start(() => rec.state !== 'inactive' && rec.stop());
     rec.start();
   }
@@ -98,7 +189,7 @@ function recorder(maxSec, onSend, label) {
       send.disabled = true;
       try { await onSend(result); URL.revokeObjectURL(url); } catch (err) { send.disabled = false; box.append(errorLine(err)); }
     } }, T.send);
-    box.replaceChildren(h('p', { class: 'meta' }, T.recorded(sec(result.durationSec))), h('audio', { controls: true, src: url }),
+    box.replaceChildren(h('p', { class: 'meta' }, T.recorded(sec(result.durationSec))), player(url, result.durationSec),
       h('div', { class: 'row' }, send, h('button', { onclick: () => { URL.revokeObjectURL(url); start(); } }, T.rerecord)));
   }
   idle();
@@ -106,6 +197,7 @@ function recorder(maxSec, onSend, label) {
 }
 
 // ---- 約束（privacy-terms-draft.md §A と同じ文。英語は下書きの断りを上に出す） ----
+// とくに同意をいただく2つ（§H の2・9）は、約束全体の中の見出しにして、入るときの印の文で名前を挙げる（T31）
 const consentBox = () => {
   const c = consentFor(lang);
   return h('section', { class: 'card consent', 'aria-labelledby': 'consent-title' },
@@ -114,10 +206,6 @@ const consentBox = () => {
     c.sections.flatMap(([title, lines]) => [h('h4', {}, title), h('ul', {}, lines.map((l) => h('li', {}, l)))]),
     h('h4', {}, c.separateTitle), h('ul', {}, c.separate.map(([, l]) => h('li', {}, l))));
 };
-
-// 約束と別の欄の同意（§H の2・9）。1つずつ印を付ける。全部に印が無いと入れない
-const separateChecks = () => consentFor(lang).separate.map(([id, l]) =>
-  h('label', { class: 'check' }, h('input', { type: 'checkbox', id: `agree-${id}`, required: true }), ` ${l}`));
 
 // 交換日記のノートだけに足す「社内で使うときの約束」（diary-promise.mjs・mvp-spec §7-7）と書き方の案内（§7-5）
 const diaryPromiseBox = () => {
@@ -130,18 +218,21 @@ const diaryPromiseBox = () => {
 };
 
 // ---- 入る（F1）。約束を読んで同意しないと入れない。どちらの言語で読んだかも残す ----
+// T31: 1画面で「入る」まで届くように、上は3行の要約だけ。約束の全文は「くわしく読む」を開くと読める（消さない）。
+// 印は、約束全体に1つ（とくに同意をいただく2つの名前を挙げる）と、交換日記なら社内で使うときの約束に1つ
 async function joinView(invite) {
   const info = await backend.inviteInfo(invite);
   const diary = info.mode === 'diary';
   const name = h('input', { type: 'text', id: 'name', maxlength: 20, required: true, autocomplete: 'nickname' });
   const email = h('input', { type: 'email', id: 'email', autocomplete: 'email' });
   const agree = h('input', { type: 'checkbox', id: 'agree', required: true });
-  const separate = separateChecks();
+  const agreePromise = diary ? h('input', { type: 'checkbox', id: 'agree-promise', required: true }) : null;
   const out = h('div');
+  const c = consentFor(lang);
   const form = h('form', { onsubmit: async (e) => {
     e.preventDefault();
     if (!agree.checked) return out.replaceChildren(errorLine(new Error(T.mustAgree)));
-    if (separate.some((l) => !l.querySelector('input').checked)) return out.replaceChildren(errorLine(new Error(T.mustAgreeSeparate)));
+    if (agreePromise && !agreePromise.checked) return out.replaceChildren(errorLine(new Error(T.mustAgreePromise)));
     try {
       await backend.join({ invite, displayName: name.value, email: email.value, consent: CONSENT_VERSION, consentLang: lang, promise: diary ? DIARY_PROMISE_VERSION : undefined });
       history.replaceState(null, '', '/#/'); // 招待の文字列を URL から消す
@@ -151,10 +242,27 @@ async function joinView(invite) {
   h('label', { for: 'name' }, T.nameLabel), name,
   h('label', { for: 'email' }, T.emailLabel), email,
   h('label', { class: 'check' }, agree, T.agreeLabel),
-  ...separate,
+  agreePromise ? h('label', { class: 'check' }, agreePromise, T.nbAgreeLabel) : null,
   h('div', { class: 'row' }, h('button', { class: 'primary', type: 'submit' }, T.joinButton)), out);
-  show(h('h2', {}, diary ? T.nbJoinTitle(info.name) : T.joinTitle), h('p', {}, diary ? T.nbJoinIntro : T.joinIntro), consentBox(), diary ? diaryPromiseBox() : null, form);
+  show(h('h2', {}, diary ? T.nbJoinTitle(info.name) : T.joinTitle), h('p', { class: 'meta' }, diary ? T.nbJoinIntro : T.joinIntro),
+    h('section', { class: 'card summary', 'aria-labelledby': 'summary-title' }, h('h3', { id: 'summary-title' }, T.summaryTitle),
+      c.draftNote ? h('p', { class: 'draft', role: 'note' }, c.draftNote) : null,
+      h('ol', {}, (diary ? diarySummaryFor(lang) : c.summary).map((l) => h('li', {}, l)))),
+    h('details', { class: 'full' }, h('summary', {}, T.readFull), consentBox(), diary ? diaryPromiseBox() : null),
+    form);
 }
+
+// 1冊目のはじめに置く見本のページ（T31）。運営の見本と明記し、保存の層には入れない（冊子にも数にも入らない）
+const samplePage = () => {
+  const s = diarySampleFor(lang);
+  return h('section', { class: 'card sample', 'aria-labelledby': 'sample-title' },
+    h('h3', { id: 'sample-title' }, T.nbSampleTitle),
+    h('p', { class: 'meta', role: 'note' }, s.label),
+    h('p', { class: 'sample-card' }, s.card),
+    h('p', {}, s.text),
+    h('ul', { class: 'plain replies' }, h('li', {}, s.margin)),
+    h('p', { class: 'meta' }, s.how));
+};
 
 // ---- 自分のこと（表示名を直す・約束を読み直す・抜けて全部消す） ----
 function selfSection(me) {
@@ -315,13 +423,32 @@ async function collectionView() {
 const toNotebook = () => h('p', {}, h('a', { href: '#/' }, T.nbBack));
 const when = (t) => new Date(t).toLocaleString(T.htmlLang, { month: 'short', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit' });
 const pageLen = (x) => (x.kind === 'voice' ? T.voiceLen(sec(x.durationSec)) : T.kindLabels.text);
+const pageTitle = (x) => x.cardText ?? (x.follows ? T.nbFollowed : T.nbFree);
+// 書いた本人が付けた見出し（T33）があれば大きく出し、カードの問いはその下に小さく
+const pageHead = (x) => x.title ?? pageTitle(x);
+const cardLine = (x) => (x.title ? h('p', { class: 'meta card-line' }, pageTitle(x)) : null);
+
+// 1ページの紙（T32）: 上に日付、下に書き手の名前。日付は日まで（時刻は出さない）
+const day = (t) => new Date(t).toLocaleDateString(T.htmlLang, { month: 'short', day: 'numeric', weekday: 'short' });
+const dateLine = (t) => (t == null ? null : h('time', { class: 'date', datetime: new Date(t).toISOString() }, day(t)));
+const sign = (x) => h('span', { class: 'sign' }, T.nbSign(x.by, x.mine));
+
+// 自分の番の知らせ（T32）: 画面のいちばん上に大きく「あなたの番です（残り◯時間）」。残りは切り上げで、1時間を切っても1と出す
+const HOUR = 60 * 60 * 1000;
+const hoursLeft = (dueAt) => Math.max(1, Math.ceil((new Date(dueAt).getTime() - Date.now()) / HOUR));
+function turnBanner(nb, { link = true } = {}) {
+  if (!nb.myTurn) return null;
+  const body = [h('strong', {}, T.nbTurnBanner(hoursLeft(nb.turn.dueAt))), h('span', {}, nb.turn.remind ? T.nbTurnRemind : T.nbTurnHint)];
+  return link ? h('a', { class: 'turn', href: '#/write' }, body) : h('div', { class: 'turn', role: 'status' }, body);
+}
+// 渡す・受け取るの1行（封筒の印は飾り。読み上げない）
+const handoff = (attrs, ...children) => h('div', { class: 'handoff', ...attrs }, h('span', { class: 'mark', 'aria-hidden': 'true' }, '✉'), h('p', {}, ...children));
 
 async function notebookView(me) {
   const nb = await backend.notebook();
   document.getElementById('who').textContent = T.who(me.displayName, me.group);
   document.getElementById('footer').textContent = T.nbFooter;
   const notices = [
-    nb.myTurn ? h('li', { class: 'card notice' }, h('a', { href: '#/write' }, nb.turn.remind ? T.nbNoticeRemind : T.nbNoticeTurn)) : null,
     ...nb.binding.filter((b) => b.myPages).map((b) => h('li', { class: 'card notice' }, h('a', { href: `#/book/${b.id}` }, T.nbNoticeBind))),
     ...nb.notices.map((n) => h('li', { class: 'card notice' }, h('a', { href: `#/page/${n.pageId}` }, n.kind === 'mark' ? T.nbNoticeMark : T.nbNoticeMargin))),
   ].filter(Boolean);
@@ -333,16 +460,21 @@ async function notebookView(me) {
     } catch (err) { out.replaceChildren(errorLine(err)); }
   };
   show(
+    turnBanner(nb),
     notices.length ? h('section', {}, h('h2', {}, T.noticesTitle), h('ul', { class: 'plain' }, notices)) : null,
     h('h2', {}, nb.notebook.name),
     h('p', { class: 'meta' }, nb.state === 'running' ? T.nbRunning(nb.volume.number, nb.volume.pages) : nb.state === 'waiting' ? T.nbWaiting : T.nbStopped),
-    nb.myTurn ? h('p', { class: 'card notice' }, h('a', { href: '#/write' }, T.nbYourTurn)) : null,
     nb.resting ? h('p', { class: 'card' }, T.nbResting, ' ', h('button', { class: 'small', onclick: async () => { await backend.resumeTurns(); route(); } }, T.nbResume)) : null,
     nb.binding.map((b) => h('p', { class: 'card' }, h('a', { href: `#/book/${b.id}` }, T.nbBindingLink(b.number, when(b.reviewEndsAt))))),
     nb.volume ? h('h3', {}, T.nbPagesTitle(nb.volume.number)) : null,
-    nb.pages.length ? h('ul', { class: 'plain' }, nb.pages.map((x) => h('li', { class: 'card' },
-      h('a', { href: `#/page/${x.id}` }, x.cardText ?? (x.follows ? T.nbFollowed : T.nbFree)),
-      h('div', { class: 'meta' }, T.voiceMeta(x.by, x.mine, pageLen(x)), ' · ', T.nbMarginCount(x.margins.length, x.marks))))) : h('p', {}, T.nbNoPages),
+    !nb.volume || nb.volume.number === 1 ? samplePage() : null,
+    nb.pages.length ? h('ul', { class: 'plain' }, nb.pages.map((x) => h('li', { class: 'page' },
+      dateLine(x.createdAt),
+      h('a', { class: 'title', href: `#/page/${x.id}` }, pageHead(x)),
+      cardLine(x),
+      x.kind === 'text' ? h('p', { class: 'body' }, x.text) : null,
+      sign(x),
+      h('div', { class: 'meta' }, pageLen(x), ' · ', T.nbMarginCount(x.margins.length, x.marks))))) : h('p', {}, T.nbNoPages),
     h('p', {}, h('a', { href: '#/books' }, T.nbShelfLink(nb.shelf))),
     h('details', {}, h('summary', {}, T.nbInviteToggle), h('p', { class: 'meta' }, T.nbInviteHint),
       h('div', { class: 'row' }, h('button', { class: 'small', onclick: renew }, T.nbInviteButton)), out),
@@ -366,12 +498,14 @@ async function writeView() {
         h('button', { class: 'small', onclick: () => pick({ cardId: c.id, follows: false }, T.nbCardChosen(c.text)) }, c.text)))));
     } catch (err) { cardsBox.replaceChildren(errorLine(err)); }
   };
-  const done = () => show(h('p', { role: 'status' }, T.nbHanded), toNotebook());
-  const write = async (input) => { await backend.writePage(input, choice); done(); };
+  const done = () => show(handoff({ role: 'status' }, T.nbHanded), toNotebook());
+  // 見出し（T33）: 書いた本人が付ける一行。なくてもよい。声でも文字でも同じ欄を使う
+  const title = h('input', { type: 'text', id: 'page-title', maxlength: 20, autocomplete: 'off', placeholder: T.nbTitlePlaceholder });
+  const write = async (input) => { await backend.writePage(input, { ...choice, title: title.value.trim() || null }); done(); };
   const text = h('textarea', { rows: 5, maxlength: 400, id: 'page-text' });
   const from = nb.turn.from;
-  show(toNotebook(), h('h2', {}, T.nbWriteTitle),
-    h('p', { class: 'card' }, from ? [T.nbFrom(from.name), ' ', h('a', { href: `#/page/${from.pageId}` }, T.nbReadIt)] : T.nbNewVolume),
+  show(turnBanner(nb, { link: false }), toNotebook(), h('h2', {}, T.nbWriteTitle),
+    handoff({}, from ? [T.nbFrom(from.name), ' ', h('a', { href: `#/page/${from.pageId}` }, T.nbReadIt)] : T.nbNewVolume),
     h('p', { class: 'meta' }, T.nbDue(when(nb.turn.dueAt))),
     h('h3', {}, T.nbHowTitle),
     h('div', { class: 'row' },
@@ -379,6 +513,7 @@ async function writeView() {
       h('button', { class: 'small', onclick: () => { cardsBox.replaceChildren(); pick({ cardId: null, follows: false }, T.nbFreeChosen); } }, T.nbFree),
       from ? h('button', { class: 'small', onclick: () => { cardsBox.replaceChildren(); pick({ cardId: null, follows: true }, T.nbFollowChosen(from.name)); } }, T.nbFollow) : null),
     cardsBox, chosen,
+    h('label', { for: 'page-title' }, T.nbTitleLabel), title,
     recorder(60, (audio) => write({ kind: 'voice', audio }), T.nbWriteVoice),
     h('details', {}, h('summary', {}, T.nbWriteText), h('label', { for: 'page-text' }, T.textMax), text,
       h('div', { class: 'row' }, h('button', { class: 'primary', onclick: async () => {
@@ -404,9 +539,13 @@ async function notebookPageView(id) {
   const inBook = h('input', { type: 'checkbox' });
   show(toNotebook(),
     h('p', { class: 'meta' }, T.nbVolumeLabel(x.volume.number, T.nbVolumeStates[x.volume.state])),
-    h('h2', {}, x.cardText ?? (x.follows ? T.nbFollowed : T.nbFree)),
-    h('div', { class: 'meta' }, T.voiceMeta(x.by, x.mine, pageLen(x))),
-    x.kind === 'voice' ? audioEl('page', x) : h('p', {}, x.text),
+    h('article', { class: 'page' },
+      dateLine(x.createdAt),
+      h('h2', {}, pageHead(x)),
+      cardLine(x),
+      x.kind === 'voice' ? audioEl('page', x) : h('p', { class: 'body' }, x.text),
+      sign(x),
+      h('div', { class: 'meta' }, pageLen(x))),
     h('div', { class: 'row' },
       x.mine ? h('span', { class: 'meta' }, T.marksMine(x.marks))
         : h('button', { class: 'small', disabled: x.markedByMe || !open, onclick: act(() => backend.margin(id, { kind: 'mark' })) }, x.markedByMe ? T.markDone(x.marks) : T.mark(x.marks)),
@@ -428,12 +567,15 @@ async function notebookPageView(id) {
 }
 
 // 冊子の棚: 綴じた冊が並ぶ（ノートの「たまっていく記録」）
+// 表紙（T32）: 「◯冊目」を大きく、ノートの名前・ページ数・いまの状態を小さく
 async function shelfView() {
-  const list = await backend.books();
-  show(toNotebook(), h('h2', {}, T.nbShelfTitle),
-    list.length ? h('ul', { class: 'plain' }, list.map((b) => h('li', { class: 'card' },
-      h('a', { href: `#/book/${b.id}` }, T.nbVolumeLabel(b.number, T.nbVolumeStates[b.state])),
-      h('div', { class: 'meta' }, T.nbBookPages(b.pages))))) : h('p', {}, T.nbShelfEmpty));
+  const [list, nb] = await Promise.all([backend.books(), backend.notebook()]);
+  show(turnBanner(nb), toNotebook(), h('h2', {}, T.nbShelfTitle),
+    list.length ? h('ul', { class: 'shelf' }, list.map((b) => h('li', {},
+      h('a', { href: `#/book/${b.id}`, 'aria-label': `${nb.notebook.name} ${T.nbVolumeLabel(b.number, T.nbVolumeStates[b.state])}` },
+        h('span', { class: 'vol' }, T.nbCoverVolume(b.number)),
+        h('span', { class: 'name' }, nb.notebook.name),
+        h('span', { class: 'state' }, T.nbBookPages(b.pages), ' · ', T.nbVolumeStates[b.state]))))) : h('p', {}, T.nbShelfEmpty));
 }
 
 // 1冊の冊子。確かめの間は、自分のページを残すか選べる（何も選ばなくてよい）
@@ -446,6 +588,7 @@ async function bookView(id) {
     b.state === 'review' ? h('p', { class: 'meta' }, T.nbReviewHint(when(b.reviewEndsAt))) : null,
     b.mine ? h('section', {}, h('h3', {}, T.nbKeepTitle),
       b.mine.length ? h('ul', { class: 'plain' }, b.mine.map((p) => h('li', { class: 'card' },
+        p.title ? h('strong', {}, p.title) : null,
         h('div', { class: 'meta' }, p.cardText ?? T.nbFree, ' · ', T.kindLabels[p.kind]),
         p.kind === 'text' ? h('p', {}, p.text) : null,
         h('button', { class: 'small', onclick: async () => {
@@ -453,9 +596,12 @@ async function bookView(id) {
         } }, p.keep ? T.keepOn : T.nbKeepOff)))) : h('p', { class: 'meta' }, T.nbNoMyPages)) : null,
     out,
     h('h3', {}, T.nbBookTitle),
-    b.items.length ? h('ul', { class: 'plain' }, b.items.map((x) => h('li', { class: 'card' },
-      h('div', { class: 'meta' }, T.voiceMeta(x.by, x.mine, x.cardText ?? T.nbFree)),
-      x.kind === 'voice' ? audioEl('page', x) : h('p', {}, x.text),
+    b.items.length ? h('ul', { class: 'plain' }, b.items.map((x) => h('li', { class: 'page' },
+      dateLine(x.createdAt),
+      h('span', { class: 'title' }, pageHead(x)),
+      cardLine(x),
+      x.kind === 'voice' ? audioEl('page', x) : h('p', { class: 'body' }, x.text),
+      sign(x),
       x.margins.length ? h('ul', { class: 'plain replies' }, x.margins.map((r) => h('li', {},
         h('span', { class: 'meta' }, T.replyBy(r.by)), r.kind === 'voice' ? audioEl('margin', r) : r.text))) : null))) : h('p', {}, T.nbBookEmpty));
 }
@@ -484,6 +630,10 @@ async function route() {
 
 applyLang();
 document.getElementById('lang').addEventListener('click', () => setLang(T.switchToLang));
+// ホーム画面に置けるように（T32）。service worker は画面のファイルだけを持ち、ノートの中身（問い合わせ・音声・Supabase）は持たない（sw.js）
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('sw.js').catch(() => { /* 置けなくても、いつもどおり開ける */ });
+}
 try {
   backend = await chooseBackend();
   addEventListener('hashchange', route);
