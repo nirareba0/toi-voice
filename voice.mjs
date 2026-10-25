@@ -2,7 +2,7 @@
 // 文字起こしはしない（AIOS DECISIONS 2026-10-24）。声の中身は端末の中でだけ扱い、どこにも送らない。
 
 // 再生の速さ。押すたびに次へ。選んだ速さは、この端末に覚えておく（サーバーには送らない）
-export const SPEEDS = [1, 1.5];
+export const SPEEDS = [1, 1.5, 2];
 export const SPEED_KEY = 'toi-voice-speed';
 export const nextSpeed = (r) => SPEEDS[(SPEEDS.indexOf(r) + 1) % SPEEDS.length];
 export const pickSpeed = (stored) => (SPEEDS.includes(Number(stored)) ? Number(stored) : SPEEDS[0]);
@@ -33,4 +33,28 @@ export function levelOf(bytes) {
 export function pushLevel(history, level, count) {
   const next = [...history, level];
   return next.length > count ? next.slice(next.length - count) : next;
+}
+
+// 聞くときの波形（2026-10-25 UI を磨く）: 中身からは作らず、声の id から決まる飾りの形（同じ声はいつも同じ形）。
+// 本物の波形を作るには音声を全部読む必要があり、聞く前に通信が増えるのでしない
+export function waveOf(seed, count) {
+  let x = 2166136261;
+  for (const ch of String(seed ?? '')) x = Math.imul(x ^ ch.codePointAt(0), 16777619) >>> 0;
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    x = Math.imul(x ^ (x >>> 15), 2246822519) >>> 0;
+    x = Math.imul(x ^ (x >>> 13), 3266489917) >>> 0;
+    // 話し声らしく、端は低く・まん中は高めに
+    const edge = Math.sin(Math.PI * (i + 0.5) / count);
+    out.push(Math.round((0.25 + 0.75 * edge * ((x % 1000) / 1000)) * 100) / 100);
+  }
+  return out;
+}
+
+// 人ごとの色（アバターと波形を同じ色にして、名前を読まなくても誰の声か分かる）。style.css の --p0〜--p7
+export const TONES = 8;
+export function toneOf(name) {
+  let x = 0;
+  for (const ch of String(name ?? '')) x = (x * 31 + ch.codePointAt(0)) >>> 0;
+  return x % TONES;
 }

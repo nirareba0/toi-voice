@@ -5,6 +5,10 @@
   --surface: #fff; --field: #999; --focus: #1a5fb4; --error: #a00;
   --draft: #b5651d; --draft-bg: #fff6ec;
   --paper: #fffdf7; --rule: #e6ddcc; --margin-rule: #e8b4a6; --cover: #7a3b24; --cover-ink: #fbf3e6; --spine: rgba(0, 0, 0, .18); --shadow: rgba(60, 40, 20, .12);
+  /* 声のログ（2026-10-25 磨く）: 生成りの地に強い差し色1つ＋人ごとの8色（Setlog・Locket の傾向） */
+  --hero: #fff1e2; --hero-ink: #2a1a10; --glass: rgba(255, 252, 247, .78); --ghost: #e9e1d6; --lit: #ffb000;
+  --tone: var(--accent); --h: 0; --p: 1; --i: 0; --icon: none; /* 部品ごとに上書きする値の既定 */
+  --p0: #ff6b4a; --p1: #2f9e8f; --p2: #6b6bf0; --p3: #e0a100; --p4: #d9488f; --p5: #3d8fe0; --p6: #7aa83a; --p7: #a061d1;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -12,23 +16,29 @@
     --surface: #26211d; --field: #7d746b; --focus: #8ab4f8; --error: #ff8a80;
     --draft: #e0a060; --draft-bg: #2e2418;
     --paper: #2a2520; --rule: #3d3630; --margin-rule: #6e3f31; --cover: #5a2c1b; --cover-ink: #f3e7d6; --spine: rgba(0, 0, 0, .3); --shadow: rgba(0, 0, 0, .4);
+    --hero: #33251c; --hero-ink: #fbeee2; --glass: rgba(38, 33, 29, .8); --ghost: #3d3630; --lit: #ffc233;
+    --tone: var(--accent); --h: 0; --p: 1; --i: 0; --icon: none;
+    --p0: #ff8a6e; --p1: #4fc2b1; --p2: #9a9af7; --p3: #f2bf3a; --p4: #ef7ab2; --p5: #6fb0f0; --p6: #9cc75e; --p7: #c28ce8;
   }
 }
 * { box-sizing: border-box; }
 .draft { border-left: 4px solid var(--draft); padding: .3rem .6rem; background: var(--draft-bg); font-weight: bold; }
-body { margin: 0 auto; max-width: 40rem; padding: 1rem; font-family: system-ui, "Hiragino Sans", "Yu Gothic UI", sans-serif; color: var(--ink); background: var(--bg); line-height: 1.7; overflow-wrap: anywhere; }
+body { margin: 0 auto; max-width: 40rem; padding: 1rem; font-family: ui-rounded, "Hiragino Maru Gothic ProN", "Hiragino Sans", system-ui, "Yu Gothic UI", sans-serif; color: var(--ink); background: var(--bg); line-height: 1.7; overflow-wrap: anywhere; }
 a { color: var(--accent); }
-header { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; border-bottom: 1px solid var(--line); }
-header h1 { font-size: 1.2rem; margin: .5rem 0; }
+header { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+header h1 { font-size: 1.05rem; margin: .3rem 0; letter-spacing: .04em; }
+header h1 a::before { content: ""; display: inline-block; width: .6rem; height: .6rem; margin-right: .4rem; border-radius: 50%; background: var(--accent); vertical-align: .08em; }
+header .who { margin-left: auto; }
+header button#lang { min-height: 36px; padding: .15rem .8rem; border-radius: 2rem; border-color: var(--line); font-size: .85rem; color: var(--sub); }
 header a { color: inherit; text-decoration: none; }
 .who { color: var(--sub); font-size: .9rem; margin: 0; }
 footer { margin-top: 3rem; color: var(--sub); font-size: .8rem; }
 h2 { font-size: 1.3rem; }
 ul.plain, ol.plain { list-style: none; padding: 0; }
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: .5rem; padding: .8rem 1rem; margin: .8rem 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 1rem; padding: .8rem 1rem; margin: .8rem 0; }
 .meta { color: var(--sub); font-size: .85rem; }
 .notice { border-left: 4px solid var(--accent); }
-button { font: inherit; color: var(--ink); padding: .5rem 1rem; border-radius: .4rem; border: 1px solid var(--ink); background: var(--surface); cursor: pointer; min-height: 44px; }
+button { font: inherit; color: var(--ink); padding: .5rem 1.1rem; border-radius: 2rem; border: 1px solid var(--ink); background: var(--surface); cursor: pointer; min-height: 44px; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 button.small { padding: .2rem .6rem; min-height: 36px; font-size: .9rem; }
 button:disabled { opacity: .5; cursor: default; }
@@ -40,12 +50,22 @@ label { display: block; margin: .8rem 0 .2rem; }
 .error { color: var(--error); }
 .replies { margin: .5rem 0 0 1rem; padding-left: .8rem; border-left: 2px solid var(--line); }
 audio { width: 100%; max-width: 100%; }
-/* 声を聞く・録る（T33）: 再生・聞く位置のつまみ・速さ。録音中の波形と残り秒数 */
-.player .row { flex-wrap: nowrap; margin: .4rem 0; }
-.player input[type=range] { flex: 1; min-width: 4rem; min-height: 36px; accent-color: var(--accent); }
-.player .time { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.player .play { min-width: 5.5rem; }
-.player .speed { min-width: 3.4rem; }
+/* 声を聞く・録る（T33・2026-10-25 磨く）: 丸い再生ボタン・波形（見えないつまみを重ねて、触ると途中から）・時間・速さ。
+   色は --tone（人ごとの色。無ければ差し色） */
+.player { --tone: var(--accent); display: flex; align-items: center; gap: .6rem; margin: .5rem 0; padding: .35rem .5rem .35rem .35rem; border-radius: 2rem; background: color-mix(in srgb, var(--tone) 12%, var(--surface)); }
+.log-item .player, .voice-card .player { --tone: inherit; }
+.player .play { flex: none; width: 44px; height: 44px; min-height: 44px; padding: 0; border: none; border-radius: 50%; background: var(--tone); display: grid; place-items: center; }
+.player .play .glyph, .play-all .glyph { width: 0; height: 0; border-style: solid; border-width: .45rem 0 .45rem .75rem; border-color: transparent transparent transparent var(--on-accent); margin-left: .15rem; }
+.player.playing .play .glyph { width: .7rem; height: .85rem; border: none; margin: 0; border-left: .22rem solid var(--on-accent); border-right: .22rem solid var(--on-accent); }
+.player .track { position: relative; flex: 1; min-width: 4rem; height: 36px; }
+.player .bars, .ghost .bars { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px; }
+.player .bars i, .ghost .bars i { flex: 1; height: calc(var(--h) * 100%); min-height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--tone) 35%, transparent); transition: background-color .15s; }
+.player .bars i.on { background: var(--tone); }
+.player input[type=range] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.player:has(input[type=range]:focus-visible) .track { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: .3rem; }
+.player .time { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; font-size: .85rem; color: var(--sub); }
+.player .speed { flex: none; min-height: 32px; min-width: 2.8rem; padding: .1rem .5rem; border-radius: 1rem; border: none; background: var(--surface); font-size: .8rem; font-weight: bold; color: var(--sub); }
+.player.playing { box-shadow: 0 0 0 2px color-mix(in srgb, var(--tone) 50%, transparent); }
 .timer.soon { color: var(--accent); font-weight: bold; }
 .wave { display: block; width: 100%; height: 48px; margin: .3rem 0; border-radius: .4rem; background: var(--paper); border: 1px solid var(--rule); }
 .card-line { margin: 0 0 .3rem; }
@@ -141,24 +161,89 @@ button.record-big:active { transform: scale(.97); }
 @keyframes fly { 0% { transform: translateY(1.5rem) scale(.6); opacity: 0; } 60% { transform: translateY(-.4rem) scale(1.08) rotate(-6deg); opacity: 1; } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .handed .mark { animation: none; } button.record-big:active { transform: none; } }
 
-/* ---- 声のログ（2026-10-25）: 今日の問いに大きな丸いボタンで答える → 下に聞ける声がたまっていく ---- */
-.today { text-align: center; padding: 1rem 1.1rem 1.2rem; border-radius: .8rem; box-shadow: 0 2px 10px var(--shadow); }
-.today .question { font-size: 1.35rem; line-height: 1.5; margin: .2rem 0 .3rem; }
-.today details, .today .row.end { text-align: left; }
-.today.done { box-shadow: none; }
+/* ---- 声のログ（2026-10-25・同日に磨く）: 今日の問いの大きなカード → 答えた人の灯り → 答える前はぼかし → 問いごとの束 ---- */
+.today { position: relative; text-align: center; padding: 1.4rem 1.2rem 1.2rem; border: none; border-radius: 1.6rem; background: var(--hero); color: var(--hero-ink); box-shadow: 0 6px 24px var(--shadow); }
+.today .eyebrow { margin: 0; font-size: .8rem; font-weight: bold; letter-spacing: .08em; color: var(--accent); }
+.today .question { font-size: 1.6rem; line-height: 1.45; margin: .5rem 0 .8rem; text-wrap: balance; }
+.today details { text-align: left; }
+.today.done { box-shadow: none; background: var(--surface); border: 1px solid var(--line); }
+.today .check { display: inline-grid; place-items: center; width: 3rem; height: 3rem; border-radius: 50%; background: var(--p1); }
+.today .check::after { content: ""; width: .7rem; height: 1.2rem; border: solid var(--on-accent); border-width: 0 .25rem .25rem 0; transform: translateY(-.15rem) rotate(45deg); }
+.today .done-line { font-size: 1.15rem; font-weight: bold; margin: .6rem 0 .2rem; }
+.today .others { margin-top: .8rem; }
 .today .others ul { margin: .4rem 0 0; }
 .today .others li { margin: .3rem 0; }
-.feed-title { margin: 1.6rem 0 .4rem; font-size: 1rem; color: var(--sub); }
+.today .alt { gap: 1rem; margin-top: .2rem; }
+.today .alt details[open] { flex-basis: 100%; }
+.today .alt summary { color: var(--sub); cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; list-style: none; text-decoration: underline; }
+.today .alt summary::-webkit-details-marker { display: none; }
+.today .review { gap: 1rem; }
+.presence { display: flex; flex-direction: column; align-items: center; gap: .35rem; font-size: .9rem; color: var(--sub); }
+.presence .dots { display: flex; flex-wrap: wrap; justify-content: center; gap: .3rem; }
+.presence .dots i { width: .8rem; height: .8rem; border-radius: 50%; background: var(--ghost); }
+.presence .dots i.on { background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 25%, transparent); }
+
+/* 録音: 大きな丸。録音中は同じ丸が止めるボタンになり、まわりの輪が残り秒数で減る（--p は 1→0）。脈を打つ */
+button.record-big { position: relative; display: grid; place-items: center; width: 10rem; height: 10rem; margin: 1.2rem auto .8rem; padding: 0; border-radius: 50%; border: none; background: var(--accent); color: var(--on-accent); box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 40%, transparent); }
+button.record-big .core { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .2rem; font-weight: bold; }
+button.record-big .mic { width: 2.4rem; height: 2.4rem; background: var(--on-accent); -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
+button.record-big small { font-weight: normal; font-size: .8rem; opacity: .9; }
+button.record-big.live { background: conic-gradient(var(--accent) calc(var(--p) * 1turn), var(--ghost) 0); box-shadow: none; animation: pulse 1.4s ease-in-out infinite; }
+button.record-big.live .core { width: 8.8rem; height: 8.8rem; border-radius: 50%; background: var(--surface); color: var(--ink); }
+button.record-big .square { width: 1.4rem; height: 1.4rem; border-radius: .3rem; background: var(--accent); }
+button.record-big .timer { font-size: 1.8rem; line-height: 1.1; }
+@keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+
+/* 答える前の仲間の声: ぼかした形だけ（名前・中身は出さない） */
+.locked { margin: 1rem 0 0; }
+.locked .lock-line { display: flex; align-items: center; justify-content: center; gap: .5rem; font-weight: bold; margin: 0 0 .4rem; }
+.locked .lock { position: relative; width: .9rem; height: .7rem; border-radius: .15rem; background: var(--ink); margin-top: .35rem; }
+.locked .lock::before { content: ""; position: absolute; left: .1rem; bottom: .6rem; width: .7rem; height: .45rem; box-sizing: border-box; border: .15rem solid var(--ink); border-bottom: none; border-radius: .4rem .4rem 0 0; }
+.ghost { display: flex; align-items: center; gap: .6rem; padding: .6rem .8rem; margin: .4rem 0; border-radius: 2rem; background: color-mix(in srgb, var(--tone) 10%, var(--surface)); filter: blur(3px); opacity: .8; }
+.ghost .avatar { background: var(--tone); }
+.ghost .bars { position: relative; flex: 1; height: 28px; }
+
+/* 問いごとの束 */
+.feed-title { margin: 2rem 0 .2rem; font-size: .8rem; letter-spacing: .08em; color: var(--sub); }
+.thread { margin: .4rem 0 1.4rem; }
+.thread-head { display: flex; align-items: flex-start; justify-content: space-between; gap: .6rem; padding: .6rem 0 .2rem; position: sticky; top: 0; z-index: 2; background: var(--bg); }
+.thread-head .q { font-weight: bold; font-size: 1.05rem; line-height: 1.5; color: var(--ink); text-decoration: none; }
 ul.log { margin: 0; }
+.log-item { --tone: var(--accent); padding: .8rem 0; border-bottom: 1px solid var(--line); }
+.log-item:last-child { border-bottom: none; }
+ul.log.reveal .log-item { animation: open .5s ease-out both; animation-delay: calc(var(--i) * 80ms); }
+@keyframes open { from { filter: blur(6px); opacity: 0; transform: translateY(.4rem); } to { filter: none; opacity: 1; transform: none; } }
+.speaker { display: flex; align-items: center; gap: .5rem; }
+.speaker time { margin-left: auto; }
+.avatar { flex: none; display: inline-grid; place-items: center; width: 2.2rem; height: 2.2rem; border-radius: 50%; background: var(--tone, var(--accent)); color: var(--on-accent); font-weight: bold; }
+.bubble-text { margin: .5rem 0; padding: .6rem .9rem; border-radius: 1.1rem; background: color-mix(in srgb, var(--tone) 10%, var(--surface)); white-space: pre-wrap; }
+.acts { display: flex; gap: .5rem; flex-wrap: wrap; }
+.pill { display: inline-flex; align-items: center; gap: .3rem; min-height: 36px; padding: .2rem .8rem; border-radius: 2rem; border: 1px solid var(--line); background: var(--surface); color: var(--sub); font-size: .85rem; text-decoration: none; }
+.pill b { color: var(--ink); }
+button.pill:active { transform: scale(.94); }
+.pill.on { border-color: var(--lit); color: var(--ink); background: color-mix(in srgb, var(--lit) 18%, var(--surface)); opacity: 1; }
+.pill.still { border-style: dashed; }
+.play-all { flex: none; color: var(--ink); border-color: var(--ink); }
+.play-all .glyph { border-color: transparent transparent transparent var(--ink); border-width: .35rem 0 .35rem .55rem; }
+.voice-card { --tone: var(--accent); border-radius: 1.2rem; }
+.voice-card .row { gap: .5rem; }
+.voice-card .replies { border-left-color: color-mix(in srgb, var(--tone) 40%, transparent); }
+
+/* 自分: これまで答えた数（連続の数にしない。途切れても0に戻らない） */
+.stat { display: flex; align-items: baseline; gap: .6rem; border-radius: 1.2rem; }
+.stat .big { font-size: 2.4rem; font-weight: bold; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* 下のタブ: 半透明のガラス（iOS 26 の傾向）。絵は線の SVG を mask で（色は文字の色） */
+nav.tabs { background: var(--glass); -webkit-backdrop-filter: blur(16px) saturate(1.4); backdrop-filter: blur(16px) saturate(1.4); }
+nav.tabs .icon[class*="i-"] { width: 1.6rem; height: 1.6rem; background: currentColor; -webkit-mask: var(--icon) center / contain no-repeat; mask: var(--icon) center / contain no-repeat; }
+.i-log { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M4 10v4M8 6v12M12 9v6M16 4v16M20 10v4'/%3E%3C/svg%3E"); }
+.i-mic { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round'%3E%3Crect x='9' y='3' width='6' height='11' rx='3'/%3E%3Cpath d='M5 11a7 7 0 0 0 14 0M12 18v3'/%3E%3C/svg%3E"); }
+.i-me { --icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6'/%3E%3C/svg%3E"); }
+
 /* 端末を移す番号（2026-10-25）: 大きく・4けたずつ */
 .device .code { font-size: 2rem; font-weight: bold; letter-spacing: .15em; font-variant-numeric: tabular-nums; text-align: center; margin: .5rem 0 0; }
 .claim input { font-size: 1.4rem; letter-spacing: .15em; text-align: center; }
-.notify-banner a { white-space: nowrap; }
-.log-item { padding: .9rem 0; border-bottom: 1px solid var(--line); }
-.log-item:last-child { border-bottom: none; }
-.speaker { display: flex; align-items: center; gap: .5rem; }
-.speaker time { margin-left: auto; }
-.avatar { flex: none; display: inline-grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: bold; }
-.log-item .q { display: block; margin: .35rem 0 .1rem; color: var(--sub); font-size: .9rem; text-decoration: none; }
-.log-item .body { margin: .4rem 0; white-space: pre-wrap; }
+.notify-banner { display: flex; align-items: center; justify-content: space-between; gap: .6rem; border-left: none; border-radius: 1rem; background: color-mix(in srgb, var(--lit) 16%, var(--surface)); }
+.notify-banner a { white-space: nowrap; font-weight: bold; }
 .reply-link { margin-left: auto; font-size: .9rem; }
+@media (prefers-reduced-motion: reduce) { button.record-big.live, ul.log.reveal .log-item { animation: none; } button.pill:active { transform: none; } }

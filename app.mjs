@@ -6,7 +6,7 @@ import { chooseBackend } from './backend.mjs';
 import { UI, LANG_KEY, pickLang, translateError } from './i18n.mjs';
 import { diaryPromiseFor, diarySummaryFor, diarySampleFor, DIARY_PROMISE_VERSION } from './diary-promise.mjs';
 import { logPromiseFor, logSummaryFor, logSampleFor, LOG_PROMISE_VERSION } from './log-promise.mjs';
-import { SPEED_KEY, pickSpeed, nextSpeed, clock, lengthOf, seekTo, levelOf, pushLevel } from './voice.mjs';
+import { SPEED_KEY, pickSpeed, nextSpeed, clock, lengthOf, seekTo, levelOf, pushLevel, waveOf, toneOf } from './voice.mjs';
 import { TUTORIAL, PLATFORMS, VAPID_META, platformOf, pushState, turnOn, turnOff } from './notify.mjs';
 
 const main = document.getElementById('main');
@@ -72,27 +72,54 @@ function setSpeed(next) {
 }
 
 // src は URL か、URL を返す Promise（Supabase では期限つき URL なので、届いてから入れる）
-function player(src, durationSec) {
+// 2026-10-25 磨く（WhatsApp・LINE の声のメッセージの形）: 丸い再生ボタン・波形（触ると途中から。中身は見えないつまみを重ねる）・時間・速さ。
+// 1つ鳴らすとほかは止まる。chain が同じ声は、終わると次の声へ続く（「続けて聞く」・Airchat）
+const players = new Set();
+const WAVE_VIEW = 32;
+const toneStyle = (name) => `--tone: var(--p${toneOf(name)})`;
+function player(src, durationSec, { seed = '', tone = null, chain = null, title = '' } = {}) {
   const audio = h('audio', { preload: 'none' });
   let length = lengthOf(NaN, durationSec);
   let dragging = false;
-  const play = h('button', { class: 'small play', type: 'button', disabled: true }, T.playButton);
+  const play = h('button', { class: 'play', type: 'button', disabled: true, 'aria-label': T.playButton }, h('span', { class: 'glyph', 'aria-hidden': 'true' }));
+  const bars = waveOf(seed, WAVE_VIEW).map((v) => h('i', { style: `--h: ${v}` }));
   const seek = h('input', { type: 'range', min: 0, max: Math.max(length, 0.1), step: 0.1, value: 0, 'aria-label': T.seekAria, disabled: true });
-  const time = h('span', { class: 'meta time' }, `${clock(0)} / ${clock(length)}`);
-  const rate = h('button', { class: 'small speed', type: 'button', 'aria-label': T.speedAria, onclick: () => setSpeed(nextSpeed(speed)) }, T.speedButton(speed));
+  const time = h('span', { class: 'time' }, clock(length));
+  const rate = h('button', { class: 'speed', type: 'button', 'aria-label': T.speedAria, onclick: () => setSpeed(nextSpeed(speed)) }, T.speedButton(speed));
   const paint = (at = audio.currentTime) => {
-    time.textContent = `${clock(at)} / ${clock(length)}`;
+    time.textContent = at > 0 ? clock(at) : clock(length);
     seek.setAttribute('aria-valuetext', T.seekValue(clock(at), clock(length)));
     if (!dragging) seek.value = String(at);
+    const lit = length > 0 ? Math.round((at / length) * bars.length) : 0;
+    bars.forEach((b, i) => b.classList.toggle('on', i < lit));
   };
+  const box = h('div', { class: 'player', style: tone == null ? null : toneStyle(tone) },
+    audio, play, h('span', { class: 'track' }, h('span', { class: 'bars', 'aria-hidden': 'true' }, bars), seek), time, rate);
+  const me = { audio, box, chain };
   audio.addEventListener('loadedmetadata', () => { length = lengthOf(audio.duration, durationSec); seek.max = String(Math.max(length, 0.1)); paint(); });
   audio.addEventListener('timeupdate', () => paint());
-  audio.addEventListener('play', () => { audio.playbackRate = speed; play.textContent = T.pauseButton; });
-  audio.addEventListener('pause', () => { play.textContent = T.playButton; });
+  audio.addEventListener('play', () => {
+    for (const other of players) {
+      if (other.box.isConnected === false) players.delete(other);
+      else if (other !== me && !other.audio.paused) other.audio.pause();
+    }
+    audio.playbackRate = speed;
+    box.classList.add('playing');
+    play.setAttribute('aria-label', T.pauseButton);
+    // ロック画面・イヤホンからも止められるように（読めるのは名前と問いだけ）
+    if (globalThis.navigator?.mediaSession && globalThis.MediaMetadata && title) navigator.mediaSession.metadata = new MediaMetadata({ title, artist: T.appTitle });
+  });
+  audio.addEventListener('pause', () => { box.classList.remove('playing'); play.setAttribute('aria-label', T.playButton); });
+  audio.addEventListener('ended', () => {
+    box.classList.remove('playing');
+    if (chain == null) return;
+    const list = [...players].filter((x) => x.chain === chain && x.box.isConnected !== false);
+    list[list.indexOf(me) + 1]?.audio.play().catch(() => {});
+  });
   play.addEventListener('click', () => (audio.paused ? audio.play().catch(() => {}) : audio.pause()));
   seek.addEventListener('input', () => { dragging = true; paint(Number(seek.value)); });
   seek.addEventListener('change', () => { audio.currentTime = seekTo(seek.value, length); dragging = false; paint(); });
-  const box = h('div', { class: 'player' }, audio, h('div', { class: 'row' }, play, seek, time, rate));
+  players.add(me);
   Promise.resolve(src).then((url) => {
     audio.src = url;
     audio.defaultPlaybackRate = speed;
@@ -102,8 +129,8 @@ function player(src, durationSec) {
   return box;
 }
 
-// 音声の URL は保存の層が出す
-const audioEl = (kind, item) => player(backend.audioUrl(kind, item), item.durationSec);
+// 音声の URL は保存の層が出す。波形の形は声の id から（同じ声はいつも同じ形）
+const audioEl = (kind, item, opts = {}) => player(backend.audioUrl(kind, item), item.durationSec, { seed: item.id, ...opts });
 
 // 録音中の波形（T33）: 右が新しい。色は style.css の変数から取る（暗い画面でも同じ決まり）
 const WAVE_BARS = 60;
@@ -175,7 +202,7 @@ function recorder(maxSec, onSend, label, { big = false } = {}) {
 
   function idle(msg) {
     const button = big
-      ? h('button', { class: 'record-big', type: 'button', onclick: start }, h('span', { class: 'dot', 'aria-hidden': 'true' }), h('span', {}, label), h('small', {}, T.upTo(maxSec)))
+      ? h('button', { class: 'record-big', type: 'button', onclick: start }, h('span', { class: 'core' }, h('span', { class: 'mic i-mic', 'aria-hidden': 'true' }), h('span', {}, label), h('small', {}, T.upTo(maxSec))))
       : h('button', { class: 'primary', type: 'button', onclick: start }, T.recordButton(label, maxSec));
     fill(box, h('div', { class: big ? 'row center' : 'row' }, button), msg ? h('p', { class: 'meta' }, msg) : null);
   }
@@ -199,11 +226,18 @@ function recorder(maxSec, onSend, label, { big = false } = {}) {
     // 残り秒数は大きく。残り10秒を切ったら色を変える（T33）
     const timer = h('span', { class: 'timer', 'aria-live': 'off' }, T.remaining(maxSec));
     const wave = h('canvas', { class: 'wave', width: 600, height: 96, 'aria-hidden': 'true' });
-    box.replaceChildren(h('div', { class: 'row' }, h('span', {}, T.recording), timer, h('button', { onclick: () => rec.state !== 'inactive' && rec.stop() }, T.stop)), wave);
+    const stopNow = () => rec.state !== 'inactive' && rec.stop();
+    // 大きいボタン: 同じ丸が止めるボタンになり、まわりの輪が残り秒数で減っていく（2026-10-25 磨く）
+    const ring = big ? h('button', { class: 'record-big live', type: 'button', 'aria-label': T.stop, onclick: stopNow, style: '--p: 1' },
+      h('span', { class: 'core' }, h('span', { class: 'square', 'aria-hidden': 'true' }), timer, h('small', {}, T.recording))) : null;
+    box.replaceChildren(...(big
+      ? [h('div', { class: 'row center' }, ring), wave]
+      : [h('div', { class: 'row' }, h('span', {}, T.recording), timer, h('button', { onclick: stopNow }, T.stop)), wave]));
     tick = setInterval(() => {
       const left = limit.remaining();
-      timer.textContent = T.remaining(left);
+      timer.textContent = big ? clock(left) : T.remaining(left);
       timer.classList.toggle('soon', left <= 10);
+      ring?.setAttribute('style', `--p: ${Math.max(0, left / maxSec)}`);
     }, 250);
     meter = startWave(stream, wave);
     if (!meter) wave.remove();
@@ -216,8 +250,8 @@ function recorder(maxSec, onSend, label, { big = false } = {}) {
       send.disabled = true;
       try { await onSend(result); URL.revokeObjectURL(url); } catch (err) { send.disabled = false; box.append(errorLine(err)); }
     } }, T.send);
-    box.replaceChildren(h('p', { class: 'meta' }, T.recorded(sec(result.durationSec))), player(url, result.durationSec),
-      h('div', { class: 'row' }, send, h('button', { onclick: () => { URL.revokeObjectURL(url); start(); } }, T.rerecord)));
+    box.replaceChildren(h('p', { class: 'meta' }, T.recorded(sec(result.durationSec))), player(url, result.durationSec, { seed: url }),
+      h('div', { class: big ? 'row center review' : 'row' }, send, h('button', { class: big ? 'quiet' : null, onclick: () => { URL.revokeObjectURL(url); start(); } }, T.rerecord)));
   }
   idle();
   return box;
@@ -390,18 +424,21 @@ async function promptView(id) {
     const replyText = h('input', { type: 'text', maxlength: 140, 'aria-label': T.replyAria, placeholder: T.replyPlaceholder });
     const out = h('div');
     const act = (fn) => async () => { try { await fn(); reload(); } catch (err) { out.replaceChildren(errorLine(err)); } };
-    return h('li', { class: 'card' },
-      h('div', { class: 'meta' }, T.voiceMeta(byName(x.by), x.mine, x.kind === 'voice' ? T.voiceLen(sec(x.durationSec)) : T.kindLabels.text)),
-      x.kind === 'voice' ? audioEl('voice', x) : h('p', {}, x.text),
+    return h('li', { class: log ? 'card voice-card' : 'card', style: log ? toneStyle(byName(x.by)) : null },
+      log ? speakerRow(x) : h('div', { class: 'meta' }, T.voiceMeta(byName(x.by), x.mine, x.kind === 'voice' ? T.voiceLen(sec(x.durationSec)) : T.kindLabels.text)),
+      x.kind === 'voice' ? audioEl('voice', x, log ? { chain: id, title: `${speakerName(x)} — ${v.prompt.text}` } : {}) : h('p', { class: log ? 'bubble-text' : null }, x.text),
       h('div', { class: 'row' },
         x.mine ? h('span', { class: 'meta' }, T.marksMine(x.marks))
-          : h('button', { class: 'small', disabled: x.markedByMe, onclick: act(() => backend.reply(x.id, { kind: 'mark' }, { promptId: id })) }, x.markedByMe ? T.markDone(x.marks) : T.mark(x.marks)),
+          : log ? h('button', { class: x.markedByMe ? 'pill on' : 'pill', type: 'button', disabled: x.markedByMe, onclick: act(() => backend.reply(x.id, { kind: 'mark' }, { promptId: id })) },
+            h('span', { class: 'emo', 'aria-hidden': 'true' }, '😮'), T.logMarkShort, Number(x.marks) ? h('b', {}, String(x.marks)) : null)
+            : h('button', { class: 'small', disabled: x.markedByMe, onclick: act(() => backend.reply(x.id, { kind: 'mark' }, { promptId: id })) }, x.markedByMe ? T.markDone(x.marks) : T.mark(x.marks)),
         x.mine ? h('button', { class: 'small', onclick: del(() => backend.deleteVoice(x.id), T.deleteVoiceConfirm) }, T.deleteButton) : null,
         // 講座で紹介してよい（S10）: 押した声だけ運営者が聞ける。いつでも外せる
-        x.mine ? h('button', { class: 'small', onclick: act(() => backend.setShare(x.id, !x.shared)) }, x.shared ? T.shareOn : T.shareOff) : null),
+        // 声のログ（社内向け）には運営者がいないので出さない
+        x.mine && !log ? h('button', { class: 'small', onclick: act(() => backend.setShare(x.id, !x.shared)) }, x.shared ? T.shareOn : T.shareOff) : null),
       x.replies.length ? h('ul', { class: 'plain replies' }, x.replies.map((r) => h('li', {},
         h('span', { class: 'meta' }, T.replyBy(byName(r.by))),
-        r.kind === 'voice' ? audioEl('reply', r) : r.text,
+        r.kind === 'voice' ? audioEl('reply', r, log ? { tone: byName(r.by) } : {}) : r.text,
         r.mine ? h('button', { class: 'small', onclick: del(() => backend.deleteReply(r.id), T.deleteReplyConfirm) }, T.deleteButton) : null))) : null,
       h('details', {}, h('summary', {}, T.replyToggle),
         h('div', { class: 'row' }, replyText, h('button', { class: 'small', onclick: act(() => backend.reply(x.id, { kind: 'text', text: replyText.value }, { promptId: id })) }, T.send)),
@@ -507,7 +544,9 @@ const empty = (text, ...action) => h('div', { class: 'empty' }, h('p', {}, text)
 function tabNav(tabs, active, due, aria) {
   return h('nav', { class: 'tabs', 'aria-label': aria }, tabs.map(([href, icon, label]) =>
     h('a', { href, 'aria-current': href === active ? 'page' : null, class: href === due ? 'due' : null },
-      h('span', { class: 'icon', 'aria-hidden': 'true' }, icon), h('span', { class: 'label' }, label))));
+      // 英字の名前は style.css の線の絵（.i-log など）。交換日記版は絵文字のまま
+      /^[a-z]+$/.test(icon) ? h('span', { class: `icon i-${icon}`, 'aria-hidden': 'true' }) : h('span', { class: 'icon', 'aria-hidden': 'true' }, icon),
+      h('span', { class: 'label' }, label))));
 }
 // 交換日記: 4つ。自分の番のときは「書く」に点
 const tabBar = (active, nb) => tabNav([['#/', '📖', T.nbTabNotebook], ['#/write', '🎙', T.nbTabWrite], ['#/books', '📚', T.nbTabShelf], ['#/me', '🙂', T.nbTabMe]],
@@ -564,6 +603,7 @@ async function meView() {
     } catch (err) { out.replaceChildren(errorLine(err)); }
   };
   show(
+    lg ? h('section', { class: 'card stat' }, h('span', { class: 'big' }, String(Number(lg.answered) || 0)), h('span', {}, T.logMeCount)) : null,
     h('section', { class: 'invite' }, h('h2', {}, T.nbInviteToggle), h('p', { class: 'meta' }, T.nbInviteHint),
       h('div', { class: 'row' }, h('button', { class: 'primary', onclick: renew }, T.nbInviteButton)), out),
     deviceCodeBox(),
@@ -745,54 +785,110 @@ async function notifyView() {
 // ---- 声のログ版（社内向け・2026-10-25 本人「VoiceLog の方向性で」） ----
 // 1画面目は「今日の問い」に大きな丸い録音ボタンで答える → 下に、聞ける声が新しい順にたまっていく（ログ）。
 // 答える（パスも）と、その問いへの仲間の声が聞ける（R-1）。順番・持ち時間・冊は無い
-const logTabBar = (active, lg) => tabNav([['#/', '🎧', T.logTabLog], ['#/answer', '🎙', T.logTabAnswer], ['#/me', '🙂', T.logTabMe]],
+const logTabBar = (active, lg) => tabNav([['#/', 'log', T.logTabLog], ['#/answer', 'mic', T.logTabAnswer], ['#/me', 'me', T.logTabMe]],
   active, lg?.open?.length ? '#/answer' : null, T.logTabsAria);
 const initial = (name) => [...String(name)][0] ?? '';
+
+// 誰が答えたかの気配（Setlog の「光る顔」）: 答えた数だけ点が灯る。名前・中身は答えてから（R-1）
+function presence(lg, p) {
+  // 数を返さない古い保存の層（schema.sql を流し直す前）では出さない（「一番乗り」と誤って言わない）
+  if (p.answers == null) return null;
+  const n = Number(p.answers) || 0;
+  const total = Math.max(Number(lg.log?.members) || 0, n);
+  const dots = Array.from({ length: Math.min(total, 12) }, (_, i) => h('i', { class: i < n ? 'on' : null, style: i < n ? `--tone: var(--p${i % 8})` : null }));
+  return h('div', { class: 'presence' }, dots.length ? h('span', { class: 'dots', 'aria-hidden': 'true' }, dots) : null,
+    h('span', {}, n ? T.logAnsweredSoFar(n, total) : T.logBeFirst));
+}
+
+// 答える前の仲間の声: ぼかした形だけ見せる（BeReal）。名前も中身も出さない。数は answers と同じ
+const lockedVoices = (n) => h('section', { class: 'locked', 'aria-label': T.logLocked(n) },
+  h('p', { class: 'lock-line' }, h('span', { class: 'lock', 'aria-hidden': 'true' }), T.logLocked(n)),
+  h('ul', { class: 'plain', 'aria-hidden': 'true' }, Array.from({ length: Math.min(n, 3) }, (_, i) => h('li', { class: 'ghost', style: `--tone: var(--p${(i * 3 + 1) % 8})` },
+    h('span', { class: 'avatar' }), h('span', { class: 'bars' }, waveOf(`ghost${i}`, 24).map((v) => h('i', { style: `--h: ${v}` })))))));
+
+// 答えた直後だけ、ログの声を順にひらく（動きを減らす設定では動かさない）
+let revealNext = false;
 
 // 今日の問い: いちばん新しい、まだ答えていない問いに、その場で答える。文字・パスは下に小さく。ほかに答えていない問いは畳んで出す
 function todayCard(lg, after) {
   const p = (lg.open ?? []).find((x) => x.id && has(x.text));
   if (!p) {
-    return h('section', { class: 'card today done' }, h('p', {}, T.logAllDone),
+    return h('section', { class: 'card today done' }, h('span', { class: 'check', 'aria-hidden': 'true' }), h('p', { class: 'done-line' }, T.logAllDone),
       h('p', { class: 'meta' }, validTime(lg.nextOpensAt) ? T.logNext(when(lg.nextOpensAt)) : T.logNoNext));
   }
   const out = h('div');
   const text = h('textarea', { rows: 4, maxlength: 400, id: 'answer-text' });
-  const send = async (input) => { await backend.answer(p.id, input); after(); };
+  const send = async (input) => { await backend.answer(p.id, input); revealNext = true; after(); };
   const guard = (fn) => async () => { try { await fn(); } catch (err) { out.replaceChildren(errorLine(err)); } };
   const others = (lg.open ?? []).filter((x) => x.id && has(x.text) && x.id !== p.id);
   return h('section', { class: 'card today', 'aria-labelledby': 'today-title' },
-    h('p', { class: 'meta', id: 'today-title' }, T.logToday),
+    h('p', { class: 'eyebrow', id: 'today-title' }, T.logToday, validTime(p.opensAt) ? h('span', {}, ' · ', shortWhen(p.opensAt)) : null),
     h('h2', { class: 'question' }, p.text),
-    h('p', { class: 'meta' }, T.logUnlock),
+    presence(lg, p),
     recorder(60, (audio) => send({ kind: 'voice', audio }), T.logRecord, { big: true }),
-    h('details', {}, h('summary', {}, T.answerText), h('label', { for: 'answer-text' }, T.textMax), text,
-      h('div', { class: 'row' }, h('button', { onclick: guard(() => send({ kind: 'text', text: text.value })) }, T.sendText))),
-    h('div', { class: 'row end' }, h('button', { class: 'quiet', onclick: guard(() => send({ kind: 'pass' })) }, T.pass)),
+    h('div', { class: 'row center alt' },
+      h('details', {}, h('summary', {}, T.answerText), h('label', { for: 'answer-text' }, T.textMax), text,
+        h('div', { class: 'row' }, h('button', { onclick: guard(() => send({ kind: 'text', text: text.value })) }, T.sendText))),
+      h('button', { class: 'quiet', onclick: guard(() => send({ kind: 'pass' })) }, T.pass)),
     out,
     others.length ? h('details', { class: 'others' }, h('summary', {}, T.logOtherOpen(others.length)),
       h('ul', { class: 'plain' }, others.map((x) => h('li', {}, h('a', { href: `#/p/${x.id}` }, x.text))))) : null);
 }
 
-// ログの1件: 誰が・いつ・どの問いに・声（か文字）。「それ知らなかった」と返事はその場から
-function logItem(x) {
+// 時刻は短く: 今日なら「19:58」、ほかの日は「10月25日」
+const shortWhen = (t) => {
+  if (!validTime(t)) return '';
+  const d = new Date(t);
+  return d.toDateString() === new Date().toDateString()
+    ? d.toLocaleTimeString(T.htmlLang, { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString(T.htmlLang, { month: 'short', day: 'numeric' });
+};
+const speakerName = (x) => (x.mine ? T.logMine : byName(x.by));
+// 誰が・いつ。アバターは人ごとの色（名前から決まる）
+const speakerRow = (x) => h('div', { class: 'speaker' },
+  h('span', { class: 'avatar', 'aria-hidden': 'true' }, initial(speakerName(x))), h('strong', {}, speakerName(x)),
+  validTime(x.createdAt) ? h('time', { class: 'meta', datetime: new Date(x.createdAt).toISOString() }, shortWhen(x.createdAt)) : null);
+
+// ログの1件: 誰が・いつ・声（か文字）。「それ知らなかった」と返事はその場から。問いは束の見出しに出す
+function logItem(x, i) {
   const out = h('div');
   const marks = Number(x.marks) || 0;
   const replies = Number(x.replies) || 0;
-  const who = x.mine ? T.logMine : byName(x.by);
   const mark = async () => {
     try { await backend.reply(x.id, { kind: 'mark' }, { promptId: x.promptId }); route(); } catch (err) { out.replaceChildren(errorLine(err)); }
   };
-  return h('li', { class: 'log-item' },
-    h('div', { class: 'speaker' }, h('span', { class: 'avatar', 'aria-hidden': 'true' }, initial(who)), h('strong', {}, who),
-      validTime(x.createdAt) ? h('time', { class: 'meta', datetime: new Date(x.createdAt).toISOString() }, when(x.createdAt)) : null),
-    has(x.prompt) && x.promptId ? h('a', { class: 'q', href: `#/p/${x.promptId}` }, x.prompt) : null,
-    x.kind === 'voice' ? audioEl('voice', x) : h('p', { class: 'body' }, x.text ?? ''),
-    h('div', { class: 'row' },
-      x.mine ? (marks ? h('span', { class: 'meta' }, T.marksMine(marks)) : null)
-        : h('button', { class: 'small mark-btn', disabled: !!x.markedByMe, onclick: mark }, x.markedByMe ? T.markDone(marks) : T.mark(marks)),
-      x.promptId ? h('a', { class: 'reply-link', href: `#/p/${x.promptId}` }, replies ? T.logReplies(replies) : T.logOpenVoice) : null),
+  return h('li', { class: 'log-item', style: `${toneStyle(byName(x.by))}; --i: ${i}` },
+    speakerRow(x),
+    x.kind === 'voice' ? audioEl('voice', x, { chain: x.promptId, title: `${speakerName(x)} — ${x.prompt ?? ''}` }) : h('p', { class: 'bubble-text' }, x.text ?? ''),
+    h('div', { class: 'acts' },
+      x.mine ? (marks ? h('span', { class: 'pill still' }, h('span', { class: 'emo', 'aria-hidden': 'true' }, '😮'), T.marksMine(marks)) : null)
+        : h('button', { class: x.markedByMe ? 'pill on' : 'pill', type: 'button', disabled: !!x.markedByMe, onclick: mark },
+          h('span', { class: 'emo', 'aria-hidden': 'true' }, '😮'), T.logMarkShort, marks ? h('b', {}, String(marks)) : null),
+      x.promptId ? h('a', { class: 'pill', href: `#/p/${x.promptId}` }, h('span', { class: 'emo', 'aria-hidden': 'true' }, '💬'), replies ? T.logReplies(replies) : T.logOpenVoice) : null),
     out);
+}
+
+// ログを問いごとの束にする（同じ問いの文を何度も出さない）。束ごとに「続けて聞く」
+function threads(feed) {
+  const list = [];
+  const byPrompt = new Map();
+  for (const x of feed) {
+    const key = x.promptId ?? x.id;
+    if (!byPrompt.has(key)) { const t = { key, promptId: x.promptId, prompt: x.prompt, items: [] }; byPrompt.set(key, t); list.push(t); }
+    byPrompt.get(key).items.push(x);
+  }
+  return list;
+}
+function threadView(t, reveal) {
+  const items = t.items.map(logItem);
+  const firstVoice = () => [...players].find((x) => x.chain === t.promptId && x.box.isConnected !== false);
+  const voices = t.items.filter((x) => x.kind === 'voice').length;
+  return h('section', { class: 'thread' },
+    h('div', { class: 'thread-head' },
+      has(t.prompt) && t.promptId ? h('a', { class: 'q', href: `#/p/${t.promptId}` }, t.prompt) : h('span', { class: 'q' }, T.logFeedTitle),
+      voices > 1 ? h('button', { class: 'pill play-all', type: 'button', onclick: () => firstVoice()?.audio.play().catch(() => {}) },
+        h('span', { class: 'glyph', 'aria-hidden': 'true' }), T.logPlayAll) : null),
+    h('ul', { class: reveal ? 'plain log reveal' : 'plain log' }, items));
 }
 
 // まだ聞ける声が無いときの見本（運営の見本と明記し、保存の層には入れない）
@@ -823,14 +919,20 @@ async function logHomeView(me) {
   const feed = (lg.feed ?? []).filter((x) => x.id);
   const seen = new Set();
   const notices = (lg.notices ?? []).filter((n) => n.promptId && !seen.has(`${n.kind}:${n.promptId}`) && seen.add(`${n.kind}:${n.promptId}`));
+  const today = (lg.open ?? []).find((x) => x.id && has(x.text));
+  const reveal = revealNext;
+  revealNext = false;
   show(
     h('div', { class: 'nb-head' }, h('h2', {}, has(lg.log?.name) ? lg.log.name : T.logTabLog)),
     banner,
     notices.length ? h('ul', { class: 'plain' }, notices.map((n) => h('li', { class: 'card notice' },
       h('a', { href: `#/p/${n.promptId}` }, n.kind === 'mark' ? T.logNoticeMark : T.logNoticeReply)))) : null,
     todayCard(lg, route),
-    h('h3', { class: 'feed-title' }, T.logFeedTitle),
-    feed.length ? h('ul', { class: 'plain log' }, feed.map(logItem)) : [h('p', { class: 'meta' }, T.logEmpty), logSample()],
+    today && Number(today.answers) > 0 ? lockedVoices(Number(today.answers)) : null,
+    feed.length || !(today && Number(today.answers) > 0) ? h('h3', { class: 'feed-title' }, T.logFeedTitle) : null,
+    // 聞ける声が無いときは見本。ただし、ぼかした仲間の声が上に出ているときは重ねない
+    feed.length ? threads(feed).map((t, i) => threadView(t, reveal && i === 0))
+      : today && Number(today.answers) > 0 ? null : [h('p', { class: 'meta' }, T.logEmpty), logSample()],
     logTabBar('#/', lg));
 }
 
@@ -839,6 +941,7 @@ async function logAnswerView() {
   const lg = await backend.log();
   document.getElementById('footer').textContent = T.logFooter;
   show(todayCard(lg, () => { location.hash = '#/'; }),
+    (() => { const t = (lg.open ?? []).find((x) => x.id && has(x.text)); return t && Number(t.answers) > 0 ? lockedVoices(Number(t.answers)) : null; })(),
     Number(lg.answered) ? h('p', { class: 'meta center' }, T.logAnsweredCount(Number(lg.answered))) : null,
     logTabBar('#/answer', lg));
 }
