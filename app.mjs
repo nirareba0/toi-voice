@@ -5,6 +5,7 @@ import { consentFor, CONSENT_VERSION } from './consent.mjs';
 import { chooseBackend } from './backend.mjs';
 import { UI, LANG_KEY, pickLang, translateError } from './i18n.mjs';
 import { diaryPromiseFor, diarySummaryFor, diarySampleFor, DIARY_PROMISE_VERSION } from './diary-promise.mjs';
+import { logPromiseFor, logSummaryFor, logSampleFor, LOG_PROMISE_VERSION } from './log-promise.mjs';
 import { SPEED_KEY, pickSpeed, nextSpeed, clock, lengthOf, seekTo, levelOf, pushLevel } from './voice.mjs';
 import { TUTORIAL, PLATFORMS, VAPID_META, platformOf, pushState, turnOn, turnOff } from './notify.mjs';
 
@@ -53,6 +54,12 @@ const fill = (el, ...children) => el.replaceChildren(...kids(children));
 
 // 保存の層（backend.mjs）。試作のサーバーか Supabase かを、画面は気にしない
 let backend;
+// いまのグループの種類（me の mode: season・diary・log）。入った・抜けたら null に戻して読み直す
+let mode = null;
+async function currentMode() {
+  if (mode == null) mode = await backend.me().then((me) => me.mode, () => null);
+  return mode;
+}
 
 // ---- 声を聞く（T33）: 再生・止める・聞く位置のつまみ（途中から聞ける）・速さ（1倍・1.5倍） ----
 // 速さは全部の声で同じにし、この端末に覚えておく。長さは記録の秒数を先に使う（録音した webm は長さが無いことがある）
@@ -121,7 +128,7 @@ const byName = (by) => (has(by) ? by : T.someone);
 // 上の右の名前。グループの名前が無いとき（交換日記・Supabase 版）は表示名だけ
 function setWho(me) {
   const name = has(me.displayName) ? me.displayName : '';
-  document.getElementById('who').textContent = me.mode !== 'diary' && name && has(me.group) ? T.who(name, me.group) : name;
+  document.getElementById('who').textContent = me.mode !== 'diary' && me.mode !== 'log' && name && has(me.group) ? T.who(name, me.group) : name;
 }
 // サーバーの断りは日本語で来る。英語の画面では辞書（i18n.mjs の ERRORS_EN）で英語にする
 const errorLine = (err) => h('p', { class: 'error', role: 'alert' }, translateError(err.message, lang));
@@ -227,9 +234,9 @@ const consentBox = () => {
     h('h4', {}, c.separateTitle), h('ul', {}, c.separate.map(([, l]) => h('li', {}, l))));
 };
 
-// 交換日記のノートだけに足す「社内で使うときの約束」（diary-promise.mjs・mvp-spec §7-7）と書き方の案内（§7-5）
-const diaryPromiseBox = () => {
-  const d = diaryPromiseFor(lang);
+// 社内のノート・声のログだけに足す「社内で使うときの約束」（diary-promise.mjs・log-promise.mjs）と使い方の案内
+const workPromiseBox = (m) => {
+  const d = m === 'log' ? logPromiseFor(lang) : diaryPromiseFor(lang);
   const note = consentFor(lang).draftNote;
   return h('section', { class: 'card consent' }, h('h3', {}, d.title),
     note ? h('p', { class: 'draft', role: 'note' }, note) : null,
@@ -244,9 +251,10 @@ const diaryPromiseBox = () => {
 async function joinView(invite) {
   const info = await backend.inviteInfo(invite);
   const diary = info.mode === 'diary';
+  const log = info.mode === 'log';
   const name = h('input', { type: 'text', id: 'name', maxlength: 20, required: true, autocomplete: 'nickname' });
   const agree = h('input', { type: 'checkbox', id: 'agree', required: true });
-  const agreePromise = diary ? h('input', { type: 'checkbox', id: 'agree-promise', required: true }) : null;
+  const agreePromise = diary || log ? h('input', { type: 'checkbox', id: 'agree-promise', required: true }) : null;
   const out = h('div');
   const c = consentFor(lang);
   const form = h('form', { onsubmit: async (e) => {
@@ -254,21 +262,25 @@ async function joinView(invite) {
     if (!agree.checked) return out.replaceChildren(errorLine(new Error(T.mustAgree)));
     if (agreePromise && !agreePromise.checked) return out.replaceChildren(errorLine(new Error(T.mustAgreePromise)));
     try {
-      await backend.join({ invite, displayName: name.value, consent: CONSENT_VERSION, consentLang: lang, promise: diary ? DIARY_PROMISE_VERSION : undefined });
-      // 招待の文字列を URL から消す。交換日記は、はじめに通知のチュートリアルを出す（T36。「あとで」で飛ばせる）
-      history.replaceState(null, '', diary ? '/#/notify' : '/#/');
+      await backend.join({ invite, displayName: name.value, consent: CONSENT_VERSION, consentLang: lang,
+        promise: diary ? DIARY_PROMISE_VERSION : log ? LOG_PROMISE_VERSION : undefined });
+      // 招待の文字列を URL から消す（join の隣の ./ へ。GitHub Pages ではサブフォルダ /toi-voice/）。
+      // 社内のノート・声のログは、はじめに通知のチュートリアルを出す（T36。「あとで」で飛ばせる）
+      history.replaceState(null, '', `${new URL('./', location.href).pathname}${diary || log ? '#/notify' : '#/'}`);
+      mode = null;
       route();
     } catch (err) { out.replaceChildren(errorLine(err)); }
   } },
   h('label', { for: 'name' }, T.nameLabel), name,
   h('label', { class: 'check' }, agree, T.agreeLabel),
-  agreePromise ? h('label', { class: 'check' }, agreePromise, T.nbAgreeLabel) : null,
+  agreePromise ? h('label', { class: 'check' }, agreePromise, log ? T.logAgreeLabel : T.nbAgreeLabel) : null,
   h('div', { class: 'row' }, h('button', { class: 'primary', type: 'submit' }, T.joinButton)), out);
-  show(h('h2', {}, diary ? T.nbJoinTitle(info.name) : T.joinTitle), h('p', { class: 'meta' }, diary ? T.nbJoinIntro : T.joinIntro),
+  show(h('h2', {}, diary ? T.nbJoinTitle(info.name) : log ? T.logJoinTitle(info.name) : T.joinTitle),
+    h('p', { class: 'meta' }, diary ? T.nbJoinIntro : log ? T.logJoinIntro : T.joinIntro),
     h('section', { class: 'card summary', 'aria-labelledby': 'summary-title' }, h('h3', { id: 'summary-title' }, T.summaryTitle),
       c.draftNote ? h('p', { class: 'draft', role: 'note' }, c.draftNote) : null,
-      h('ol', {}, (diary ? diarySummaryFor(lang) : c.summary).map((l) => h('li', {}, l)))),
-    h('details', { class: 'full' }, h('summary', {}, T.readFull), consentBox(), diary ? diaryPromiseBox() : null),
+      h('ol', {}, (diary ? diarySummaryFor(lang) : log ? logSummaryFor(lang) : c.summary).map((l) => h('li', {}, l)))),
+    h('details', { class: 'full' }, h('summary', {}, T.readFull), consentBox(), diary || log ? workPromiseBox(info.mode) : null),
     form);
 }
 
@@ -292,6 +304,7 @@ function selfSection(me) {
     if (!confirm(T.leaveConfirm)) return;
     try {
       await backend.leave();
+      mode = null;
       document.getElementById('who').textContent = '';
       show(h('p', { role: 'status' }, T.leftDone));
     } catch (err) { out.replaceChildren(errorLine(err)); }
@@ -300,9 +313,9 @@ function selfSection(me) {
     h('div', { class: 'row' }, name, h('button', { class: 'small', onclick: async () => {
       try { await backend.rename(name.value); route(); } catch (err) { out.replaceChildren(errorLine(err)); }
     } }, T.renameButton)),
-    me.mode === 'diary' ? h('p', {}, h('a', { href: '#/notify' }, T.notifyMeLink)) : null,
+    me.mode === 'diary' || me.mode === 'log' ? h('p', {}, h('a', { href: '#/notify' }, T.notifyMeLink)) : null,
     h('details', {}, h('summary', {}, T.readConsent), consentBox()),
-    me.mode === 'diary' ? h('details', {}, h('summary', {}, T.nbReadPromise), diaryPromiseBox()) : null,
+    me.mode === 'diary' || me.mode === 'log' ? h('details', {}, h('summary', {}, me.mode === 'log' ? T.logReadPromise : T.nbReadPromise), workPromiseBox(me.mode)) : null,
     h('div', { class: 'row' }, h('button', { class: 'small danger', onclick: leave }, T.leaveButton)),
     out);
 }
@@ -310,7 +323,9 @@ function selfSection(me) {
 // ---- 問いの一覧とお知らせ（F2・F6） ----
 async function homeView() {
   const me = await backend.me();
+  mode = me.mode;
   if (me.mode === 'diary') return notebookView(me);
+  if (me.mode === 'log') return logHomeView(me);
   const [prompts, keep, collection] = await Promise.all([backend.prompts(),
     backend.keepList().catch(() => ({ open: false })), backend.collection().catch(() => null)]);
   setWho(me);
@@ -332,8 +347,10 @@ async function homeView() {
 // ---- 1つの問い（F3・F4・F5・F7） ----
 async function promptView(id) {
   const v = await backend.prompt(id);
+  const log = (await currentMode()) === 'log';
   const reload = () => promptView(id);
-  const head = [h('p', {}, h('a', { href: '#/' }, T.backToList)), h('h2', {}, v.prompt.text)];
+  const tabs = log ? logTabBar(null, null) : null;
+  const head = [h('p', { class: log ? 'back' : null }, h('a', { href: '#/' }, log ? T.logBack : T.backToList)), h('h2', {}, v.prompt.text)];
   // 指名（mvp-spec §0-4）: 自分が指名かだけを出す。仲間には「2人が指名されている」ことだけ
   if (v.nomination && !v.myAnswer) {
     head.push(v.nomination.me
@@ -348,13 +365,13 @@ async function promptView(id) {
     const guard = (fn) => async () => { try { await fn(); reload(); } catch (err) { out.replaceChildren(errorLine(err)); } };
     const form = [
       v.afterDeadline ? null : h('p', {}, T.answerUnlocks),
-      recorder(60, async (audio) => { await backend.answer(id, { kind: 'voice', audio }); reload(); }, T.answerVoice),
+      recorder(60, async (audio) => { await backend.answer(id, { kind: 'voice', audio }); reload(); }, log ? T.logRecord : T.answerVoice, { big: log }),
       h('details', {}, h('summary', {}, T.answerText), h('label', { for: 'answer-text' }, T.textMax), text,
         h('div', { class: 'row' }, h('button', { onclick: guard(() => backend.answer(id, { kind: 'text', text: text.value })) }, T.sendText))),
       h('div', { class: 'row' }, h('button', { onclick: guard(() => backend.answer(id, { kind: 'pass' })) }, T.pass)),
       out];
     // 締め切りの前は答える画面だけ。後は答える画面の下に仲間の声も出す
-    if (!v.afterDeadline) return show(...head, ...form);
+    if (!v.afterDeadline) return show(...head, ...form, tabs);
     head.push(...form);
   }
   const del = (fn, msg) => async () => { if (confirm(msg)) { await fn(); reload(); } };
@@ -382,7 +399,8 @@ async function promptView(id) {
   });
   show(...head,
     v.myAnswer?.kind === 'pass' ? h('p', { class: 'meta' }, T.passed, h('button', { class: 'small', onclick: del(() => backend.deleteVoice(v.myAnswer.id), T.undoPassConfirm) }, T.undoPass)) : null,
-    v.voices.length ? h('ul', { class: 'plain' }, items) : h('p', {}, T.noVoices));
+    v.voices.length ? h('ul', { class: 'plain' }, items) : h('p', {}, T.noVoices),
+    tabs);
 }
 
 // ---- 最後の問い（F9） ----
@@ -474,13 +492,15 @@ const handoff = (attrs, ...children) => h('div', { class: 'handoff', ...attrs },
 // 空の画面の一言（状態ごと）。次の行動があれば1つだけ下に
 const empty = (text, ...action) => h('div', { class: 'empty' }, h('p', {}, text), ...action);
 
-// 下のタブ（4つ・どの画面でも同じ並び）。自分の番のときは「書く」に点
-function tabBar(active, nb) {
-  const tabs = [['#/', '📖', T.nbTabNotebook], ['#/write', '🎙', T.nbTabWrite], ['#/books', '📚', T.nbTabShelf], ['#/me', '🙂', T.nbTabMe]];
-  return h('nav', { class: 'tabs', 'aria-label': T.nbTabsAria }, tabs.map(([href, icon, label]) =>
-    h('a', { href, 'aria-current': href === active ? 'page' : null, class: href === '#/write' && nb?.myTurn ? 'due' : null },
+// 下のタブ（どの画面でも同じ並び）。due のタブに点（自分の番・まだ答えていない問い）
+function tabNav(tabs, active, due, aria) {
+  return h('nav', { class: 'tabs', 'aria-label': aria }, tabs.map(([href, icon, label]) =>
+    h('a', { href, 'aria-current': href === active ? 'page' : null, class: href === due ? 'due' : null },
       h('span', { class: 'icon', 'aria-hidden': 'true' }, icon), h('span', { class: 'label' }, label))));
 }
+// 交換日記: 4つ。自分の番のときは「書く」に点
+const tabBar = (active, nb) => tabNav([['#/', '📖', T.nbTabNotebook], ['#/write', '🎙', T.nbTabWrite], ['#/books', '📚', T.nbTabShelf], ['#/me', '🙂', T.nbTabMe]],
+  active, nb?.myTurn ? '#/write' : null, T.nbTabsAria);
 
 async function notebookView(me) {
   const nb = await backend.notebook();
@@ -521,8 +541,10 @@ async function notebookView(me) {
 async function meView() {
   const me = await backend.me();
   setWho(me);
-  if (me.mode !== 'diary') return show(selfSection(me));
-  const nb = await backend.notebook().catch(() => null);
+  if (me.mode !== 'diary' && me.mode !== 'log') return show(selfSection(me));
+  const log = me.mode === 'log';
+  const nb = log ? null : await backend.notebook().catch(() => null);
+  const lg = log ? await backend.log().catch(() => null) : null;
   const out = h('div');
   const renew = async () => {
     try {
@@ -534,7 +556,7 @@ async function meView() {
     h('section', { class: 'invite' }, h('h2', {}, T.nbInviteToggle), h('p', { class: 'meta' }, T.nbInviteHint),
       h('div', { class: 'row' }, h('button', { class: 'primary', onclick: renew }, T.nbInviteButton)), out),
     selfSection(me),
-    tabBar('#/me', nb),
+    log ? logTabBar('#/me', lg) : tabBar('#/me', nb),
   );
 }
 
@@ -681,9 +703,12 @@ async function bookView(id) {
 const vapidKey = () => document.querySelector?.(`meta[name="${VAPID_META}"]`)?.getAttribute('content')?.trim() ?? '';
 let notifyPlatform = null;
 async function notifyView() {
-  const nb = await backend.notebook().catch(() => null);
+  const log = (await currentMode()) === 'log';
+  const nb = log ? null : await backend.notebook().catch(() => null);
+  const lg = log ? await backend.log().catch(() => null) : null;
   const platform = notifyPlatform ?? platformOf(navigator.userAgent);
-  const publicKey = vapidKey();
+  // 公開の鍵: Supabase 版は関数 push_public_key から（Edge Function が作って Vault に置いたもの）。meta はローカルの試し用
+  const publicKey = vapidKey() || (await backend.pushKey().catch(() => null)) || '';
   const win = globalThis;
   const out = h('div');
   const state = await pushState({ win, publicKey });
@@ -692,7 +717,7 @@ async function notifyView() {
     : state === 'on' ? h('button', { class: 'small quiet', type: 'button', onclick: act(() => turnOff({ win, remove: (e) => backend.deletePush(e) })) }, T.notifyOff)
       : null;
   const steps = T.notifySteps[platform];
-  show(h('h2', {}, T.notifyTitle), h('p', { class: 'meta' }, T.notifyIntro),
+  show(h('h2', {}, T.notifyTitle), h('p', { class: 'meta' }, log ? T.notifyIntroLog : T.notifyIntro),
     h('div', { class: 'chips', role: 'group', 'aria-label': T.notifyPlatformAria }, PLATFORMS.map((p) =>
       h('button', { class: 'chip', type: 'button', 'aria-pressed': String(p === platform), onclick: () => { notifyPlatform = p; notifyView(); } }, T.notifyPlatforms[p]))),
     h('ol', { class: 'plain tutorial' }, TUTORIAL[platform].map((img, i) => h('li', { class: 'card step' },
@@ -701,7 +726,98 @@ async function notifyView() {
     h('section', { class: 'notify-now', 'aria-live': 'polite' }, T.notifyStates[state] ? h('p', { role: 'status' }, T.notifyStates[state]) : null,
       action ? h('div', { class: 'row center' }, action) : null, out),
     h('p', { class: 'center' }, h('a', { href: '#/' }, T.notifyLater)),
-    nb ? tabBar('#/me', nb) : null);
+    log ? logTabBar('#/me', lg) : nb ? tabBar('#/me', nb) : null);
+}
+
+// ---- 声のログ版（社内向け・2026-10-25 本人「VoiceLog の方向性で」） ----
+// 1画面目は「今日の問い」に大きな丸い録音ボタンで答える → 下に、聞ける声が新しい順にたまっていく（ログ）。
+// 答える（パスも）と、その問いへの仲間の声が聞ける（R-1）。順番・持ち時間・冊は無い
+const logTabBar = (active, lg) => tabNav([['#/', '🎧', T.logTabLog], ['#/answer', '🎙', T.logTabAnswer], ['#/me', '🙂', T.logTabMe]],
+  active, lg?.open?.length ? '#/answer' : null, T.logTabsAria);
+const initial = (name) => [...String(name)][0] ?? '';
+
+// 今日の問い: いちばん新しい、まだ答えていない問いに、その場で答える。文字・パスは下に小さく。ほかに答えていない問いは畳んで出す
+function todayCard(lg, after) {
+  const p = (lg.open ?? []).find((x) => x.id && has(x.text));
+  if (!p) {
+    return h('section', { class: 'card today done' }, h('p', {}, T.logAllDone),
+      h('p', { class: 'meta' }, validTime(lg.nextOpensAt) ? T.logNext(when(lg.nextOpensAt)) : T.logNoNext));
+  }
+  const out = h('div');
+  const text = h('textarea', { rows: 4, maxlength: 400, id: 'answer-text' });
+  const send = async (input) => { await backend.answer(p.id, input); after(); };
+  const guard = (fn) => async () => { try { await fn(); } catch (err) { out.replaceChildren(errorLine(err)); } };
+  const others = (lg.open ?? []).filter((x) => x.id && has(x.text) && x.id !== p.id);
+  return h('section', { class: 'card today', 'aria-labelledby': 'today-title' },
+    h('p', { class: 'meta', id: 'today-title' }, T.logToday),
+    h('h2', { class: 'question' }, p.text),
+    h('p', { class: 'meta' }, T.logUnlock),
+    recorder(60, (audio) => send({ kind: 'voice', audio }), T.logRecord, { big: true }),
+    h('details', {}, h('summary', {}, T.answerText), h('label', { for: 'answer-text' }, T.textMax), text,
+      h('div', { class: 'row' }, h('button', { onclick: guard(() => send({ kind: 'text', text: text.value })) }, T.sendText))),
+    h('div', { class: 'row end' }, h('button', { class: 'quiet', onclick: guard(() => send({ kind: 'pass' })) }, T.pass)),
+    out,
+    others.length ? h('details', { class: 'others' }, h('summary', {}, T.logOtherOpen(others.length)),
+      h('ul', { class: 'plain' }, others.map((x) => h('li', {}, h('a', { href: `#/p/${x.id}` }, x.text))))) : null);
+}
+
+// ログの1件: 誰が・いつ・どの問いに・声（か文字）。「それ知らなかった」と返事はその場から
+function logItem(x) {
+  const out = h('div');
+  const marks = Number(x.marks) || 0;
+  const replies = Number(x.replies) || 0;
+  const who = x.mine ? T.logMine : byName(x.by);
+  const mark = async () => {
+    try { await backend.reply(x.id, { kind: 'mark' }, { promptId: x.promptId }); route(); } catch (err) { out.replaceChildren(errorLine(err)); }
+  };
+  return h('li', { class: 'log-item' },
+    h('div', { class: 'speaker' }, h('span', { class: 'avatar', 'aria-hidden': 'true' }, initial(who)), h('strong', {}, who),
+      validTime(x.createdAt) ? h('time', { class: 'meta', datetime: new Date(x.createdAt).toISOString() }, when(x.createdAt)) : null),
+    has(x.prompt) && x.promptId ? h('a', { class: 'q', href: `#/p/${x.promptId}` }, x.prompt) : null,
+    x.kind === 'voice' ? audioEl('voice', x) : h('p', { class: 'body' }, x.text ?? ''),
+    h('div', { class: 'row' },
+      x.mine ? (marks ? h('span', { class: 'meta' }, T.marksMine(marks)) : null)
+        : h('button', { class: 'small mark-btn', disabled: !!x.markedByMe, onclick: mark }, x.markedByMe ? T.markDone(marks) : T.mark(marks)),
+      x.promptId ? h('a', { class: 'reply-link', href: `#/p/${x.promptId}` }, replies ? T.logReplies(replies) : T.logOpenVoice) : null),
+    out);
+}
+
+// まだ聞ける声が無いときの見本（運営の見本と明記し、保存の層には入れない）
+const logSample = () => {
+  const s = logSampleFor(lang);
+  return h('section', { class: 'card sample', 'aria-labelledby': 'log-sample-title' },
+    h('h3', { id: 'log-sample-title' }, T.logSampleTitle),
+    h('p', { class: 'meta', role: 'note' }, s.label),
+    h('p', { class: 'sample-card' }, s.prompt),
+    h('p', {}, h('strong', {}, s.by), ' ', s.text),
+    h('ul', { class: 'plain replies' }, h('li', {}, s.reply)),
+    h('p', { class: 'meta' }, s.how));
+};
+
+async function logHomeView(me) {
+  const lg = await backend.log();
+  setWho(me);
+  document.getElementById('footer').textContent = T.logFooter;
+  const feed = (lg.feed ?? []).filter((x) => x.id);
+  const seen = new Set();
+  const notices = (lg.notices ?? []).filter((n) => n.promptId && !seen.has(`${n.kind}:${n.promptId}`) && seen.add(`${n.kind}:${n.promptId}`));
+  show(
+    h('div', { class: 'nb-head' }, h('h2', {}, has(lg.log?.name) ? lg.log.name : T.logTabLog)),
+    notices.length ? h('ul', { class: 'plain' }, notices.map((n) => h('li', { class: 'card notice' },
+      h('a', { href: `#/p/${n.promptId}` }, n.kind === 'mark' ? T.logNoticeMark : T.logNoticeReply)))) : null,
+    todayCard(lg, route),
+    h('h3', { class: 'feed-title' }, T.logFeedTitle),
+    feed.length ? h('ul', { class: 'plain log' }, feed.map(logItem)) : [h('p', { class: 'meta' }, T.logEmpty), logSample()],
+    logTabBar('#/', lg));
+}
+
+// 「答える」のタブ: 今日の問いだけ。答えたらログへ
+async function logAnswerView() {
+  const lg = await backend.log();
+  document.getElementById('footer').textContent = T.logFooter;
+  show(todayCard(lg, () => { location.hash = '#/'; }),
+    Number(lg.answered) ? h('p', { class: 'meta center' }, T.logAnsweredCount(Number(lg.answered))) : null,
+    logTabBar('#/answer', lg));
 }
 
 async function route() {
@@ -710,6 +826,7 @@ async function route() {
     if (location.hash === '#/keep') return await keepView();
     if (location.hash === '#/collection') return await collectionView();
     if (location.hash === '#/write') return await writeView();
+    if (location.hash === '#/answer') return await logAnswerView();
     if (location.hash === '#/books') return await shelfView();
     if (location.hash === '#/me') return await meView();
     const page = location.hash.match(/^#\/page\/([\w-]+)$/);
@@ -732,6 +849,13 @@ applyLang();
 document.getElementById('lang').addEventListener('click', () => setLang(T.switchToLang));
 // ホーム画面に置けるように（T32）。service worker は画面のファイルだけを持ち、ノートの中身（問い合わせ・音声・Supabase）は持たない（sw.js）
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  // 新しい版の service worker が入れ替わったら、1回だけ読み直す（古い画面のまま新しい保存の層を使わない・2026-10-25）。
+  // はじめて置いたとき（前の service worker が無い）は読み直さない
+  const updating = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (updating && !reloaded) { reloaded = true; location.reload(); }
+  });
   navigator.serviceWorker.register('sw.js').catch(() => { /* 置けなくても、いつもどおり開ける */ });
 }
 try {

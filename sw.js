@@ -3,10 +3,10 @@
 // ノートの中身（/api/・音声・Supabase への問い合わせ）は持たず、いつも通信に任せる。端末に中身が残らないように。
 // 開き方: 手元にあれば先に出し、裏で新しい版を取ってきて置き換える（次に開いたときに新しい版になる）。
 // 画面を大きく変えたら CACHE の版を上げる（古い置き場は activate で消える）。
-const CACHE = 'toi-voice-shell-2026-10-24-5';
+const CACHE = 'toi-voice-shell-2026-10-25-1';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.mjs', 'i18n.mjs', 'consent.mjs', 'diary-promise.mjs', 'limit.mjs', 'voice.mjs', 'notify.mjs',
-  'backend.mjs', 'backend-local.mjs', 'backend-supabase.mjs',
+  'backend.mjs', 'backend-local.mjs', 'backend-supabase.mjs', 'log-promise.mjs',
   'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png', 'icon-180.png',
   'tut-ios-add.svg', 'tut-android-add.svg', 'tut-open.svg', 'tut-allow.svg',
 ];
@@ -14,14 +14,15 @@ const SHELL = [
 // 通知（T36）: 届くのは { kind, lang } だけ。文はここで決める（notify.mjs の PUSH_TEXT と同じ。test/notify.test.mjs が突き合わせる）。
 // 名前・ページの言葉・順番は届かないし、出さない。同じ種類の通知は1つにまとめる（tag）
 const PUSH_TEXT = {
-  ja: { title: '問いと声', turn: 'あなたの番です', margin: 'あなたのページに余白が付きました' },
-  en: { title: 'Toi Voice', turn: "It's your turn", margin: 'Someone wrote in the margin of your page' },
+  ja: { title: '問いと声', turn: 'あなたの番です', margin: 'あなたのページに余白が付きました', prompt: '新しい問いが届きました', reply: 'あなたの声に返事が届きました' },
+  en: { title: 'Toi Voice', turn: "It's your turn", margin: 'Someone wrote in the margin of your page', prompt: 'A new question is here', reply: 'Someone replied to your voice' },
 };
+const PUSH_KINDS = ['turn', 'margin', 'prompt', 'reply'];
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { /* 読めなければ「あなたの番です」 */ }
   const lang = data.lang === 'en' ? 'en' : 'ja';
-  const kind = data.kind === 'margin' ? 'margin' : 'turn';
+  const kind = PUSH_KINDS.includes(data.kind) ? data.kind : 'turn';
   const t = PUSH_TEXT[lang];
   event.waitUntil(self.registration.showNotification(t.title, {
     body: t[kind], tag: `toi-voice-${kind}`, icon: 'icon-192.png', badge: 'icon-192.png',

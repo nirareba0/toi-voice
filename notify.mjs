@@ -1,4 +1,5 @@
 // 通知（T36・work/notify-setup.md）: 「ホーム画面に置く → 開く → 通知を許可」のチュートリアルと、Web Push の購読。
+// 公開の鍵は、Supabase 版では関数 push_public_key から読む（Edge Function が最初に動いたときに作る・2026-10-25）。meta はローカルの試し用
 // 画面（app.mjs）から使う。ブラウザの道具（navigator・Notification・service worker）は引数で受け取り、テストで偽物に差し替える。
 // 通知に載せるのは「あなたの番です」「余白が付きました」だけ。書き手の名前・ページの言葉・順番は載せない（D-2・D-3。ロック画面で人に見える）。
 // 公開の鍵（VAPID）は index.html の meta に置く（公開してよい鍵）。秘密の鍵は Supabase の Secrets にだけ置き、画面にもファイルにも書かない。
@@ -91,11 +92,12 @@ export async function turnOff({ win, remove }) {
 
 // 通知の文（sw.js にも同じ文を置く。service worker は module で読み込まない端末があるため。test/notify.test.mjs が突き合わせる）
 export const PUSH_TEXT = {
-  ja: { title: '問いと声', turn: 'あなたの番です', margin: 'あなたのページに余白が付きました' },
-  en: { title: 'Toi Voice', turn: "It's your turn", margin: 'Someone wrote in the margin of your page' },
+  ja: { title: '問いと声', turn: 'あなたの番です', margin: 'あなたのページに余白が付きました', prompt: '新しい問いが届きました', reply: 'あなたの声に返事が届きました' },
+  en: { title: 'Toi Voice', turn: "It's your turn", margin: 'Someone wrote in the margin of your page', prompt: 'A new question is here', reply: 'Someone replied to your voice' },
 };
-// 通知の中身（送る側が作る）。種類と言語だけ。名前・ページの言葉・順番は入れない
-export const PUSH_KINDS = ['turn', 'margin'];
+// 通知の中身（送る側が作る）。種類と言語だけ。名前・問いの言葉・ページの言葉・順番は入れない。
+// prompt（新しい問いが開いた）・reply（自分の声に返事が付いた）は声のログ版（2026-10-25）。印（それ知らなかった）は知らせない
+export const PUSH_KINDS = ['turn', 'margin', 'prompt', 'reply'];
 export function pushPayload(kind, lang) {
   if (!PUSH_KINDS.includes(kind)) throw new Error(`通知の種類が正しくありません: ${kind}`);
   return JSON.stringify({ kind, lang: lang === 'en' ? 'en' : 'ja' });

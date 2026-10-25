@@ -140,3 +140,21 @@ button.record-big:active { transform: scale(.97); }
 .handed h2 { font-size: 1.6rem; margin: 1rem 0 .2rem; }
 @keyframes fly { 0% { transform: translateY(1.5rem) scale(.6); opacity: 0; } 60% { transform: translateY(-.4rem) scale(1.08) rotate(-6deg); opacity: 1; } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .handed .mark { animation: none; } button.record-big:active { transform: none; } }
+
+/* ---- 声のログ（2026-10-25）: 今日の問いに大きな丸いボタンで答える → 下に聞ける声がたまっていく ---- */
+.today { text-align: center; padding: 1rem 1.1rem 1.2rem; border-radius: .8rem; box-shadow: 0 2px 10px var(--shadow); }
+.today .question { font-size: 1.35rem; line-height: 1.5; margin: .2rem 0 .3rem; }
+.today details, .today .row.end { text-align: left; }
+.today.done { box-shadow: none; }
+.today .others ul { margin: .4rem 0 0; }
+.today .others li { margin: .3rem 0; }
+.feed-title { margin: 1.6rem 0 .4rem; font-size: 1rem; color: var(--sub); }
+ul.log { margin: 0; }
+.log-item { padding: .9rem 0; border-bottom: 1px solid var(--line); }
+.log-item:last-child { border-bottom: none; }
+.speaker { display: flex; align-items: center; gap: .5rem; }
+.speaker time { margin-left: auto; }
+.avatar { flex: none; display: inline-grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: bold; }
+.log-item .q { display: block; margin: .35rem 0 .1rem; color: var(--sub); font-size: .9rem; text-decoration: none; }
+.log-item .body { margin: .4rem 0; white-space: pre-wrap; }
+.reply-link { margin-left: auto; font-size: .9rem; }

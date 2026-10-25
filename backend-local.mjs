@@ -9,12 +9,16 @@ export const DIARY_METHODS = ['inviteInfo', 'renewInvite', 'notebook', 'drawCard
   'page', 'deletePage', 'setPageKeep', 'margin', 'deleteMargin', 'setMarginInBook', 'books', 'book'];
 
 // 通知（T36・notify.mjs）: Web Push の購読を保存する・消す。中身は { endpoint, p256dh, auth, lang } だけ
-export const NOTIFY_METHODS = ['savePush', 'deletePush'];
+// pushKey: 通知の公開の鍵（VAPID）。Supabase 版は関数が作って持つ。ローカル版は無い（null）
+export const NOTIFY_METHODS = ['savePush', 'deletePush', 'pushKey'];
+
+// 声のログ版（社内向け・2026-10-25）: ログの画面（まだ答えていない問い・聞ける声）
+export const LOG_METHODS = ['log'];
 
 export const BACKEND_METHODS = [
   'join', 'me', 'rename', 'leave', 'prompts', 'prompt', 'answer', 'deleteVoice',
   'reply', 'deleteReply', 'audioUrl', 'final', 'answerFinal', 'deleteFinal',
-  ...SEASON_METHODS, ...DIARY_METHODS, ...NOTIFY_METHODS,
+  ...SEASON_METHODS, ...DIARY_METHODS, ...NOTIFY_METHODS, ...LOG_METHODS,
 ];
 
 export function localBackend({ fetch = globalThis.fetch.bind(globalThis), base = '' } = {}) {
@@ -74,5 +78,7 @@ export function localBackend({ fetch = globalThis.fetch.bind(globalThis), base =
     // 試作のサーバーは購読を持つだけで、送らない（送るのは Supabase の Edge Function・work/notify-setup.md）
     savePush: ({ endpoint, p256dh, auth, lang }) => api('/api/push', { method: 'POST', json: { endpoint, p256dh, auth, lang } }),
     deletePush: (endpoint) => api('/api/push', { method: 'DELETE', json: { endpoint } }),
+    pushKey: async () => null,
+    log: () => api('/api/log'),
   };
 }

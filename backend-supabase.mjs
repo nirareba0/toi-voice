@@ -130,6 +130,10 @@ export function supabaseBackend(client, { signedUrlSec = SIGNED_URL_SEC, uuid = 
     // 通知（T36）: 購読は本人の行だけ（schema.sql の push_subscriptions と save_push・delete_push）
     savePush: ({ endpoint, p256dh, auth, lang }) => rpc('save_push', { p_endpoint: endpoint, p_p256dh: p256dh, p_auth: auth, p_lang: lang ?? 'ja' }),
     deletePush: (endpoint) => rpc('delete_push', { p_endpoint: endpoint }),
+    // 通知の公開の鍵（VAPID）。Edge Function が最初に動いたときに作り、Vault に置いたものを返す（無ければ null）
+    pushKey: () => rpc('push_public_key'),
+    // ---- 声のログ版（社内向け・2026-10-25）。声は問いのフォルダに置く（answer と同じ） ----
+    log: () => rpc('log_view'),
     // シーズン制（mvp-spec §0-11）の関数は schema.sql にまだ無い。呼ぶと断る（台帳 T30）
     ...Object.fromEntries(SEASON_METHODS.map((name) => [name, async () => {
       throw Object.assign(new Error('この機能は、まだ Supabase 版がありません'), { status: 501 });
