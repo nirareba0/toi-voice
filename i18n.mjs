@@ -156,7 +156,7 @@ export const UI = {
     notifySteps: {
       ios: [
         ['ホーム画面に置く', 'Safari で開き、下の共有ボタン（□↑）→「ホーム画面に追加」。'],
-        ['ホーム画面から開く', '置いたアイコン「問いと声」から開きます。Safari のままだと通知は届きません。'],
+        ['ホーム画面から開く', '置いたアイコン「問いと声」から開き、上で出した8けたの番号を入れます。Safari のままだと通知は届きません。'],
         ['通知を許可する', '下の「通知を受け取る」を押し、「許可」を選びます。'],
       ],
       android: [
@@ -205,6 +205,18 @@ export const UI = {
     logNoticeMark: 'あなたの声に「それ知らなかった」が付きました',
     logBack: '← ログ',
     logAnsweredCount: (n) => `これまでに答えた問い ${n}`,
+    logNotifyBanner: '通知を受け取ると、新しい問いと返事が届いたときに知らせます',
+    logNotifyBannerHome: 'ホーム画面に置くと、新しい問いの通知が届きます',
+    logNotifyBannerLink: 'やり方を見る',
+    // 端末を移す（2026-10-25）
+    claimTitle: '番号で入る',
+    claimIntro: 'iPhone のホーム画面のアプリは、Safari とは別の入れ物です。Safari で開いた画面の「自分」か「通知の受け取り方」で8けたの番号を出して、ここに入れてください。',
+    claimLabel: '8けたの番号',
+    claimButton: '入る',
+    deviceTitle: 'ホーム画面のアプリ・ほかの端末で入る',
+    deviceIntro: '番号を出して、ホーム画面のアプリ（またはほかの端末）で入れます。入れた端末に移り、この画面では入っていない扱いになります。',
+    deviceButton: '番号を出す',
+    deviceCodeUntil: (when) => `${when} まで有効・1回だけ`,
     someone: 'だれか',
     upTo: (max) => `${max}秒まで`,
     nbUntitled: 'ノート',
@@ -413,7 +425,7 @@ export const UI = {
     notifySteps: {
       ios: [
         ['Add to Home Screen', 'Open in Safari, tap the Share button (□↑) at the bottom, then "Add to Home Screen".'],
-        ['Open from the Home Screen', 'Open the app from its new icon. Notifications do not arrive while you use it inside Safari.'],
+        ['Open from the Home Screen', 'Open the app from its new icon and enter the 8-digit code from above. Notifications do not arrive while you use it inside Safari.'],
         ['Allow notifications', 'Tap "Get notifications" below and choose "Allow".'],
       ],
       android: [
@@ -462,6 +474,18 @@ export const UI = {
     logNoticeMark: 'Someone marked your voice "I didn\'t know that"',
     logBack: '← Log',
     logAnsweredCount: (n) => `Questions you've answered: ${n}`,
+    logNotifyBanner: 'Turn on notifications to hear when a new question or a reply arrives',
+    logNotifyBannerHome: 'Add the app to your Home Screen to get notified about new questions',
+    logNotifyBannerLink: 'Show me how',
+    // Moving to another device (2026-10-25)
+    claimTitle: 'Join with a code',
+    claimIntro: 'On iPhone, the Home Screen app is kept separate from Safari. In Safari, open "Me" or "How to get notifications", tap to show an 8-digit code, and enter it here.',
+    claimLabel: '8-digit code',
+    claimButton: 'Join',
+    deviceTitle: 'Use the Home Screen app or another device',
+    deviceIntro: 'Show a code and enter it in the Home Screen app (or on another device). You will move there, and this screen will be signed out.',
+    deviceButton: 'Show code',
+    deviceCodeUntil: (when) => `Valid until ${when}, one use only`,
     someone: 'Someone',
     upTo: (max) => `up to ${max}s`,
     nbUntitled: 'Notebook',
@@ -603,6 +627,8 @@ export const ERRORS_EN = {
   '持ち時間を数える曜日は weekdays か everyday': 'Turn days must be weekdays or everyday',
   '交換日記のノートではありません': 'This is not an exchange-diary notebook',
   'ログの名前が要ります': 'A log name is required',
+  '番号が正しくないか、期限が切れています': 'The code is not valid or has expired',
+  '番号を何度もまちがえました。15分たってからもう一度入れてください': 'Too many wrong codes. Please try again in 15 minutes',
   '声のログではありません': 'This is not a voice log',
   '招待のリンクを作り直せるのは、社内のノートとログだけです': 'Only in-house notebooks and logs can renew their invite link',
   'ノートは止まっています（{}人そろうと回ります）': 'The notebook is paused (it moves again once {} people are in it)',

@@ -150,6 +150,10 @@ button.record-big:active { transform: scale(.97); }
 .today .others li { margin: .3rem 0; }
 .feed-title { margin: 1.6rem 0 .4rem; font-size: 1rem; color: var(--sub); }
 ul.log { margin: 0; }
+/* 端末を移す番号（2026-10-25）: 大きく・4けたずつ */
+.device .code { font-size: 2rem; font-weight: bold; letter-spacing: .15em; font-variant-numeric: tabular-nums; text-align: center; margin: .5rem 0 0; }
+.claim input { font-size: 1.4rem; letter-spacing: .15em; text-align: center; }
+.notify-banner a { white-space: nowrap; }
 .log-item { padding: .9rem 0; border-bottom: 1px solid var(--line); }
 .log-item:last-child { border-bottom: none; }
 .speaker { display: flex; align-items: center; gap: .5rem; }

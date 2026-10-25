@@ -15,10 +15,13 @@ export const NOTIFY_METHODS = ['savePush', 'deletePush', 'pushKey'];
 // 声のログ版（社内向け・2026-10-25）: ログの画面（まだ答えていない問い・聞ける声）
 export const LOG_METHODS = ['log'];
 
+// 端末を移す（2026-10-25）: 入っている端末で番号を出す・ほかの端末（iPhone のホーム画面のアプリ）で番号を入れて入る
+export const DEVICE_METHODS = ['makeDeviceCode', 'claimDevice'];
+
 export const BACKEND_METHODS = [
   'join', 'me', 'rename', 'leave', 'prompts', 'prompt', 'answer', 'deleteVoice',
   'reply', 'deleteReply', 'audioUrl', 'final', 'answerFinal', 'deleteFinal',
-  ...SEASON_METHODS, ...DIARY_METHODS, ...NOTIFY_METHODS, ...LOG_METHODS,
+  ...SEASON_METHODS, ...DIARY_METHODS, ...NOTIFY_METHODS, ...LOG_METHODS, ...DEVICE_METHODS,
 ];
 
 export function localBackend({ fetch = globalThis.fetch.bind(globalThis), base = '' } = {}) {
@@ -80,5 +83,7 @@ export function localBackend({ fetch = globalThis.fetch.bind(globalThis), base =
     deletePush: (endpoint) => api('/api/push', { method: 'DELETE', json: { endpoint } }),
     pushKey: async () => null,
     log: () => api('/api/log'),
+    makeDeviceCode: () => api('/api/device-code', { method: 'POST', json: {} }),
+    claimDevice: (code) => api('/api/claim', { method: 'POST', json: { code } }),
   };
 }

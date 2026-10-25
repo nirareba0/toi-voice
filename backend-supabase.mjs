@@ -134,6 +134,15 @@ export function supabaseBackend(client, { signedUrlSec = SIGNED_URL_SEC, uuid = 
     pushKey: () => rpc('push_public_key'),
     // ---- 声のログ版（社内向け・2026-10-25）。声は問いのフォルダに置く（answer と同じ） ----
     log: () => rpc('log_view'),
+    // ---- 端末を移す（2026-10-25）。番号で入る端末は、先に匿名のサインインをする。まちがいは関数が ok=false で返す ----
+    makeDeviceCode: () => rpc('make_device_code'),
+    async claimDevice(code) {
+      await signInIfNeeded();
+      const r = await rpc('claim_device', { p_code: code });
+      if (r?.ok) return r;
+      const msg = r?.reason === 'tries' ? '番号を何度もまちがえました。15分たってからもう一度入れてください' : '番号が正しくないか、期限が切れています';
+      throw Object.assign(new Error(msg), { status: 403 });
+    },
     // シーズン制（mvp-spec §0-11）の関数は schema.sql にまだ無い。呼ぶと断る（台帳 T30）
     ...Object.fromEntries(SEASON_METHODS.map((name) => [name, async () => {
       throw Object.assign(new Error('この機能は、まだ Supabase 版がありません'), { status: 501 });

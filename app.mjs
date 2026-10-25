@@ -566,6 +566,7 @@ async function meView() {
   show(
     h('section', { class: 'invite' }, h('h2', {}, T.nbInviteToggle), h('p', { class: 'meta' }, T.nbInviteHint),
       h('div', { class: 'row' }, h('button', { class: 'primary', onclick: renew }, T.nbInviteButton)), out),
+    deviceCodeBox(),
     selfSection(me),
     log ? logTabBar('#/me', lg) : tabBar('#/me', nb),
   );
@@ -731,6 +732,7 @@ async function notifyView() {
   show(h('h2', {}, T.notifyTitle), h('p', { class: 'meta' }, log ? T.notifyIntroLog : T.notifyIntro),
     h('div', { class: 'chips', role: 'group', 'aria-label': T.notifyPlatformAria }, PLATFORMS.map((p) =>
       h('button', { class: 'chip', type: 'button', 'aria-pressed': String(p === platform), onclick: () => { notifyPlatform = p; notifyView(); } }, T.notifyPlatforms[p]))),
+    state === 'needs-home' ? deviceCodeBox() : null,
     h('ol', { class: 'plain tutorial' }, TUTORIAL[platform].map((img, i) => h('li', { class: 'card step' },
       h('img', { src: img, alt: '', width: 120, height: 144 }),
       h('div', {}, h('span', { class: 'meta' }, T.notifyStep(i + 1, steps.length)), h('h3', {}, steps[i][0]), h('p', {}, steps[i][1]))))),
@@ -805,8 +807,17 @@ const logSample = () => {
     h('p', { class: 'meta' }, s.how));
 };
 
+// 通知の案内（2026-10-25 本人「アナウンスが特になかった」）: 届く状態でなければ、ログのいちばん上に1行と「やり方を見る」
+async function notifyBanner() {
+  const publicKey = vapidKey() || (await backend.pushKey().catch(() => null)) || '';
+  const state = await pushState({ win: globalThis, publicKey }).catch(() => 'unsupported');
+  if (state === 'on' || state === 'unsupported' || state === 'no-key') return null;
+  return h('p', { class: 'card notice notify-banner' }, state === 'needs-home' ? T.logNotifyBannerHome : T.logNotifyBanner, ' ',
+    h('a', { href: '#/notify' }, T.logNotifyBannerLink));
+}
+
 async function logHomeView(me) {
-  const lg = await backend.log();
+  const [lg, banner] = await Promise.all([backend.log(), notifyBanner()]);
   setWho(me);
   document.getElementById('footer').textContent = T.logFooter;
   const feed = (lg.feed ?? []).filter((x) => x.id);
@@ -814,6 +825,7 @@ async function logHomeView(me) {
   const notices = (lg.notices ?? []).filter((n) => n.promptId && !seen.has(`${n.kind}:${n.promptId}`) && seen.add(`${n.kind}:${n.promptId}`));
   show(
     h('div', { class: 'nb-head' }, h('h2', {}, has(lg.log?.name) ? lg.log.name : T.logTabLog)),
+    banner,
     notices.length ? h('ul', { class: 'plain' }, notices.map((n) => h('li', { class: 'card notice' },
       h('a', { href: `#/p/${n.promptId}` }, n.kind === 'mark' ? T.logNoticeMark : T.logNoticeReply)))) : null,
     todayCard(lg, route),
@@ -829,6 +841,39 @@ async function logAnswerView() {
   show(todayCard(lg, () => { location.hash = '#/'; }),
     Number(lg.answered) ? h('p', { class: 'meta center' }, T.logAnsweredCount(Number(lg.answered))) : null,
     logTabBar('#/answer', lg));
+}
+
+// ---- 端末を移す（2026-10-25 本人「アプリからいれると招待のリンクから入ってくださいとでてしまった」） ----
+// iPhone のホーム画面のアプリは Safari と保存の場所が別。入っていない端末では、招待のリンクの案内と一緒に「番号で入る」を出す
+function claimView() {
+  document.getElementById('who').textContent = '';
+  const code = h('input', { type: 'text', id: 'device-code', inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: 9 });
+  const out = h('div');
+  const form = h('form', { onsubmit: async (e) => {
+    e.preventDefault();
+    try {
+      await backend.claimDevice([...code.value].filter((ch) => ch >= '0' && ch <= '9').join(''));
+      await leaveJoin('#/notify');
+    } catch (err) { out.replaceChildren(errorLine(err)); }
+  } },
+  h('label', { for: 'device-code' }, T.claimLabel), code,
+  h('div', { class: 'row' }, h('button', { class: 'primary', type: 'submit' }, T.claimButton)), out);
+  show(h('p', {}, T.signInFirst), h('section', { class: 'card claim' }, h('h2', {}, T.claimTitle), h('p', { class: 'meta' }, T.claimIntro), form));
+}
+
+// 入っている端末で番号を出す（15分・1回だけ）。「自分」の画面と、iPhone の Safari の通知の画面に置く
+function deviceCodeBox() {
+  const out = h('div', { 'aria-live': 'polite' });
+  const make = async () => {
+    try {
+      const r = await backend.makeDeviceCode();
+      const c = String(r.code ?? '');
+      out.replaceChildren(h('p', { class: 'code' }, `${c.slice(0, 4)} ${c.slice(4)}`),
+        validTime(r.expiresAt) ? h('p', { class: 'meta' }, T.deviceCodeUntil(when(r.expiresAt))) : null);
+    } catch (err) { out.replaceChildren(errorLine(err)); }
+  };
+  return h('section', { class: 'card device' }, h('h3', {}, T.deviceTitle), h('p', { class: 'meta' }, T.deviceIntro),
+    h('div', { class: 'row' }, h('button', { type: 'button', onclick: make }, T.deviceButton)), out);
 }
 
 async function route() {
@@ -851,7 +896,7 @@ async function route() {
     if (location.hash === '#/final') return await finalView();
     return await homeView();
   } catch (err) {
-    if (err.status === 401) return show(h('p', {}, T.signInFirst));
+    if (err.status === 401) return claimView();
     show(errorLine(err));
   }
 }
