@@ -248,7 +248,17 @@ const workPromiseBox = (m) => {
 // T31: 1画面で「入る」まで届くように、上は3行の要約だけ。約束の全文は「くわしく読む」を開くと読める（消さない）。
 // T34: メールの欄は無い（受け取らない）。聞くのは表示名だけ
 // 印は、約束全体に1つ（とくに同意をいただく2つの名前を挙げる）と、交換日記なら社内で使うときの約束に1つ
+// 招待の文字列を URL から消して、画面へ進む（join の隣の ./ へ。GitHub Pages ではサブフォルダ /toi-voice/）。
+// route() を通さずに描く（URL が書き換わらない環境でも、入る画面に戻って回り続けない）
+function leaveJoin(hash) {
+  history.replaceState(null, '', `${new URL('./', location.href).pathname}${hash}`);
+  mode = null;
+  return hash === '#/notify' ? notifyView() : homeView();
+}
+
 async function joinView(invite) {
+  // もう入っている端末で招待のリンクを開いたら、入る画面を出さずにそのまま進む（2026-10-25 本人「もう入ってますとでておわる」）
+  if (await backend.me().then(() => true, () => false)) return leaveJoin('#/');
   const info = await backend.inviteInfo(invite);
   const diary = info.mode === 'diary';
   const log = info.mode === 'log';
@@ -264,12 +274,13 @@ async function joinView(invite) {
     try {
       await backend.join({ invite, displayName: name.value, consent: CONSENT_VERSION, consentLang: lang,
         promise: diary ? DIARY_PROMISE_VERSION : log ? LOG_PROMISE_VERSION : undefined });
-      // 招待の文字列を URL から消す（join の隣の ./ へ。GitHub Pages ではサブフォルダ /toi-voice/）。
       // 社内のノート・声のログは、はじめに通知のチュートリアルを出す（T36。「あとで」で飛ばせる）
-      history.replaceState(null, '', `${new URL('./', location.href).pathname}${diary || log ? '#/notify' : '#/'}`);
-      mode = null;
-      route();
-    } catch (err) { out.replaceChildren(errorLine(err)); }
+      leaveJoin(diary || log ? '#/notify' : '#/');
+    } catch (err) {
+      // 別のタブで先に入っていた（もう入っています）ときも、そのまま進む
+      if (err.status === 409 && await backend.me().then(() => true, () => false)) return leaveJoin('#/');
+      out.replaceChildren(errorLine(err));
+    }
   } },
   h('label', { for: 'name' }, T.nameLabel), name,
   h('label', { class: 'check' }, agree, T.agreeLabel),

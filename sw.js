@@ -3,7 +3,7 @@
 // ノートの中身（/api/・音声・Supabase への問い合わせ）は持たず、いつも通信に任せる。端末に中身が残らないように。
 // 開き方: 手元にあれば先に出し、裏で新しい版を取ってきて置き換える（次に開いたときに新しい版になる）。
 // 画面を大きく変えたら CACHE の版を上げる（古い置き場は activate で消える）。
-const CACHE = 'toi-voice-shell-2026-10-25-1';
+const CACHE = 'toi-voice-shell-2026-10-25-2';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.mjs', 'i18n.mjs', 'consent.mjs', 'diary-promise.mjs', 'limit.mjs', 'voice.mjs', 'notify.mjs',
   'backend.mjs', 'backend-local.mjs', 'backend-supabase.mjs', 'log-promise.mjs',
